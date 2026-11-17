@@ -1,0 +1,904 @@
+[
+  {
+    "members": [
+      "cat",
+      "dog",
+      "rabbit"
+    ],
+    "style": "高速双核速攻",
+    "synergy": "小兔全场最先行动，把小猫拉上来抢先放猛爪突袭；小猫普攻能触发小狗 50% 追击，小狗群攻压低全队血线方便小猫收割",
+    "plan": "第 1 回合小兔拉小猫打出第一发大招，之后集火血量最少的敌人，力争 4 回合内解决战斗",
+    "beats": [
+      "mouse",
+      "deer"
+    ],
+    "fears": [
+      "cat",
+      "snake"
+    ],
+    "notes": "能量偏紧：拉人 2 豆、大招 3 豆，不要每回合都拉人；对手有小蛇时优先击倒小蛇",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.469,
+      "avg_win_vs_random": 0.797,
+      "best_order": [
+        "rabbit",
+        "dog",
+        "cat"
+      ],
+      "best_order_random": [
+        "dog",
+        "cat",
+        "rabbit"
+      ],
+      "avg_win_vs_smart": 0.582,
+      "best_order_smart": [
+        "cat",
+        "rabbit",
+        "dog"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "dog",
+      "fish"
+    ],
+    "style": "双核 + 水链分摊",
+    "synergy": "小鱼先手拉水链，把对手打在小猫身上的伤害分摊到全队，双输出能多活一两轮；小猫、小狗持续输出",
+    "plan": "小鱼开局放水链保护输出位，之后能量全部留给小猫和小狗的大招",
+    "beats": [
+      "deer",
+      "fish"
+    ],
+    "fears": [
+      "snake",
+      "dog"
+    ],
+    "notes": "对手有小狗或小蛇时水链反而吃亏（群攻、结界都会被重复均分），这时把小鱼换成别的",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.445,
+      "avg_win_vs_random": 0.783,
+      "best_order": [
+        "dog",
+        "cat",
+        "fish"
+      ],
+      "best_order_random": [
+        "fish",
+        "dog",
+        "cat"
+      ],
+      "avg_win_vs_smart": 0.098,
+      "best_order_smart": [
+        "fish",
+        "dog",
+        "cat"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "dog",
+      "snake"
+    ],
+    "style": "三输出 + 结界压制",
+    "synergy": "三只都有伤害：小蛇结界每回合对对面每只宠物造成额外伤害，小狗群攻一起压血线，小猫收割并靠溢出伤害连续击倒",
+    "plan": "小蛇第 1 回合放结界，小猫、小狗轮流用大招，集火血量最少的敌人",
+    "beats": [
+      "fish",
+      "mouse"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "没有保护，拼的是谁先打死谁；对上随机出招的对手是最稳的一套",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.445,
+      "avg_win_vs_random": 0.846,
+      "best_order": [
+        "snake",
+        "dog",
+        "cat"
+      ],
+      "best_order_random": [
+        "dog",
+        "cat",
+        "snake"
+      ],
+      "avg_win_vs_smart": 0.294,
+      "best_order_smart": [
+        "snake",
+        "dog",
+        "cat"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "dog",
+      "mouse"
+    ],
+    "style": "能量爆发双核",
+    "synergy": "小鼠让开局能量变成 6 点，小猫和小狗第 1 回合就能各放一次大招；之后零食补给保证每回合都有大招",
+    "plan": "第 1 回合双大招直接打残对面，小鼠能量不满就补给，小猫负责收割",
+    "beats": [
+      "fish",
+      "mouse"
+    ],
+    "fears": [
+      "cat",
+      "snake"
+    ],
+    "notes": "小鼠和小猫生命一样低，把小鼠放在小猫前面的站位，可以替小猫吸收第一波集火",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.369,
+      "avg_win_vs_random": 0.783,
+      "best_order": [
+        "mouse",
+        "dog",
+        "cat"
+      ],
+      "best_order_random": [
+        "mouse",
+        "dog",
+        "cat"
+      ],
+      "avg_win_vs_smart": 0.142,
+      "best_order_smart": [
+        "mouse",
+        "dog",
+        "cat"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "mouse",
+      "snake"
+    ],
+    "style": "能量 + 结界 + 收割",
+    "synergy": "小鼠提供能量，小蛇第 1 回合放结界、小猫同回合放大招互不冲突；结界的持续伤害帮小猫把目标压进斩杀线",
+    "plan": "开局结界加猛爪突袭，之后小蛇普攻、小猫每回合大招收割",
+    "beats": [
+      "mouse",
+      "deer"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "没有群攻，对面有护盾和治疗时节奏会变慢",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.367,
+      "avg_win_vs_random": 0.721,
+      "best_order": [
+        "snake",
+        "mouse",
+        "cat"
+      ],
+      "best_order_random": [
+        "snake",
+        "cat",
+        "mouse"
+      ],
+      "avg_win_vs_smart": 0.299,
+      "best_order_smart": [
+        "mouse",
+        "snake",
+        "cat"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "mouse",
+      "fish"
+    ],
+    "style": "单核 + 能量 + 水链",
+    "synergy": "小鼠的额外能量让水链和猛爪突袭可以同回合放出；水链把小猫受到的伤害分给生命更厚的小鱼",
+    "plan": "小鱼先手水链，小猫每回合大招，小鼠负责续能量",
+    "beats": [
+      "deer",
+      "turtle"
+    ],
+    "fears": [
+      "dog",
+      "snake"
+    ],
+    "notes": "只有一个输出点，小猫倒下基本就输了；对手有群攻或结界时不要选",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.156,
+      "avg_win_vs_random": 0.512,
+      "best_order": [
+        "fish",
+        "mouse",
+        "cat"
+      ],
+      "best_order_random": [
+        "cat",
+        "mouse",
+        "fish"
+      ],
+      "avg_win_vs_smart": 0.0,
+      "best_order_smart": [
+        "cat",
+        "mouse",
+        "fish"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "dog",
+      "mouse",
+      "snake"
+    ],
+    "style": "群攻 + 结界消耗",
+    "synergy": "小鼠提供能量，小蛇结界和小狗群攻都是全体伤害，每回合稳定压低对面全队血线",
+    "plan": "开局结界加汪汪冲击，之后每回合群攻，结界到期就续上",
+    "beats": [
+      "fish",
+      "mouse"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "缺少单点击杀能力，对面有小猫时很难抢在它出手前击倒它",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.309,
+      "avg_win_vs_random": 0.642,
+      "best_order": [
+        "mouse",
+        "snake",
+        "dog"
+      ],
+      "best_order_random": [
+        "dog",
+        "snake",
+        "mouse"
+      ],
+      "avg_win_vs_smart": 0.174,
+      "best_order_smart": [
+        "mouse",
+        "snake",
+        "dog"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "rabbit",
+      "snake"
+    ],
+    "style": "拉条爆发 + 结界",
+    "synergy": "小兔把小猫拉到最前面出手，小蛇放结界做持续伤害；两只高速输出抢先压血",
+    "plan": "第 1 回合拉小猫放大招，小蛇放结界；之后小猫收割",
+    "beats": [
+      "mouse",
+      "deer"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "三只都很脆、能量也紧：拉人、结界、大招抢同一份能量",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.248,
+      "avg_win_vs_random": 0.588,
+      "best_order": [
+        "rabbit",
+        "snake",
+        "cat"
+      ],
+      "best_order_random": [
+        "snake",
+        "cat",
+        "rabbit"
+      ],
+      "avg_win_vs_smart": 0.337,
+      "best_order_smart": [
+        "rabbit",
+        "snake",
+        "cat"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "dog",
+      "rabbit",
+      "snake"
+    ],
+    "style": "先手群攻 + 结界",
+    "synergy": "小兔拉小狗抢先群攻，小蛇结界补持续伤害，全体伤害叠加",
+    "plan": "第 1 回合结界加群攻，之后每回合有能量就群攻",
+    "beats": [
+      "mouse",
+      "fish"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "没有单体爆发，打不动治疗和护盾厚的阵容",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.262,
+      "avg_win_vs_random": 0.629,
+      "best_order": [
+        "snake",
+        "dog",
+        "rabbit"
+      ],
+      "best_order_random": [
+        "snake",
+        "rabbit",
+        "dog"
+      ],
+      "avg_win_vs_smart": 0.192,
+      "best_order_smart": [
+        "dog",
+        "snake",
+        "rabbit"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "mouse",
+      "turtle"
+    ],
+    "style": "单核 + 能量 + 护盾",
+    "synergy": "小鼠保证小猫每回合都有大招，小乌的开局护盾和壳壳保护让小猫多活一轮",
+    "plan": "小猫每回合大招收割，小乌给小猫补盾，小鼠续能量",
+    "beats": [
+      "mouse",
+      "deer"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "对上随机出招的对手很稳；对上会集火的对手，单输出点容易被针对",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.206,
+      "avg_win_vs_random": 0.739,
+      "best_order": [
+        "mouse",
+        "turtle",
+        "cat"
+      ],
+      "best_order_random": [
+        "cat",
+        "mouse",
+        "turtle"
+      ],
+      "avg_win_vs_smart": 0.042,
+      "best_order_smart": [
+        "mouse",
+        "cat",
+        "turtle"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "dog",
+      "snake",
+      "fish"
+    ],
+    "style": "全体伤害 + 水链",
+    "synergy": "小蛇结界和小狗群攻负责全体伤害，小鱼水链分摊对手的单点爆发",
+    "plan": "小鱼先手水链，小蛇结界，小狗群攻；能量紧张时优先结界和群攻",
+    "beats": [
+      "mouse",
+      "deer"
+    ],
+    "fears": [
+      "dog",
+      "cat"
+    ],
+    "notes": "三个技能都要 3 豆，没有小鼠时每回合只能放一个",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.23,
+      "avg_win_vs_random": 0.608,
+      "best_order": [
+        "fish",
+        "dog",
+        "snake"
+      ],
+      "best_order_random": [
+        "dog",
+        "snake",
+        "fish"
+      ],
+      "avg_win_vs_smart": 0.0,
+      "best_order_smart": [
+        "dog",
+        "snake",
+        "fish"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "rabbit",
+      "mouse"
+    ],
+    "style": "拉条 + 能量单核速杀",
+    "synergy": "小鼠给能量、小兔拉小猫先手，小猫第 1 回合就能连续打出高伤害",
+    "plan": "把所有资源都给小猫，靠连环收割滚雪球",
+    "beats": [
+      "mouse",
+      "rabbit"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "只有小猫一个输出，另外两只又脆又不疼，容错很低",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.211,
+      "avg_win_vs_random": 0.486,
+      "best_order": [
+        "cat",
+        "rabbit",
+        "mouse"
+      ],
+      "best_order_random": [
+        "mouse",
+        "cat",
+        "rabbit"
+      ],
+      "avg_win_vs_smart": 0.167,
+      "best_order_smart": [
+        "cat",
+        "rabbit",
+        "mouse"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "dog",
+      "turtle",
+      "snake"
+    ],
+    "style": "全体伤害 + 护盾",
+    "synergy": "小蛇结界加小狗群攻打全体，小乌护盾抵挡对手的结界伤害和第一波输出",
+    "plan": "开局结界，之后群攻；小乌给血量最低的队友补盾",
+    "beats": [
+      "mouse",
+      "rabbit"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "对上随机出招的对手不错；对上会集火的对手输出不够快",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.261,
+      "avg_win_vs_random": 0.766,
+      "best_order": [
+        "turtle",
+        "dog",
+        "snake"
+      ],
+      "best_order_random": [
+        "dog",
+        "turtle",
+        "snake"
+      ],
+      "avg_win_vs_smart": 0.07,
+      "best_order_smart": [
+        "dog",
+        "turtle",
+        "snake"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "dog",
+      "turtle"
+    ],
+    "style": "双输出 + 护盾",
+    "synergy": "小猫普攻触发小狗 50% 追击；汪汪冲击削掉对方全队护盾；小乌开局护盾保护输出位",
+    "plan": "前 3 回合集火对方输出位，护盾挡住第一波伤害",
+    "beats": [
+      "mouse",
+      "turtle"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "对上小蛇时，小乌护盾先吸收结界伤害，可以减少冻结；我方护盾薄，面对集火作用有限",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.239,
+      "avg_win_vs_random": 0.845,
+      "best_order": [
+        "turtle",
+        "cat",
+        "dog"
+      ],
+      "best_order_random": [
+        "turtle",
+        "dog",
+        "cat"
+      ],
+      "avg_win_vs_smart": 0.159,
+      "best_order_smart": [
+        "dog",
+        "turtle",
+        "cat"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "turtle",
+      "snake"
+    ],
+    "style": "结界 + 收割 + 护盾",
+    "synergy": "小蛇结界压血线，小猫收割，小乌护盾保护两个输出位",
+    "plan": "开局结界，小猫大招集火，小乌给小猫补盾",
+    "beats": [
+      "mouse",
+      "rabbit"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "能量紧张：结界、大招、护盾都要能量",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.191,
+      "avg_win_vs_random": 0.709,
+      "best_order": [
+        "snake",
+        "turtle",
+        "cat"
+      ],
+      "best_order_random": [
+        "snake",
+        "turtle",
+        "cat"
+      ],
+      "avg_win_vs_smart": 0.084,
+      "best_order_smart": [
+        "snake",
+        "turtle",
+        "cat"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "mouse",
+      "deer"
+    ],
+    "style": "单核 + 能量 + 治疗",
+    "synergy": "小鼠保证小猫的大招，小鹿给小猫回血延长输出时间",
+    "plan": "小猫每回合大招，小鹿在小猫掉血后治疗",
+    "beats": [
+      "mouse",
+      "deer"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "治疗量按我方较低的生命上限计算，扛不住对手的爆发",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.191,
+      "avg_win_vs_random": 0.688,
+      "best_order": [
+        "mouse",
+        "deer",
+        "cat"
+      ],
+      "best_order_random": [
+        "cat",
+        "mouse",
+        "deer"
+      ],
+      "avg_win_vs_smart": 0.0,
+      "best_order_smart": [
+        "cat",
+        "mouse",
+        "deer"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "dog",
+      "deer",
+      "snake"
+    ],
+    "style": "全体伤害 + 治疗",
+    "synergy": "小蛇结界加小狗群攻打全体，小鹿治疗维持血线",
+    "plan": "开局结界，之后群攻；小鹿治疗掉血最多的队友",
+    "beats": [
+      "mouse",
+      "rabbit"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "节奏偏慢，容易被拖进对手擅长的持久战",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.214,
+      "avg_win_vs_random": 0.706,
+      "best_order": [
+        "snake",
+        "deer",
+        "dog"
+      ],
+      "best_order_random": [
+        "snake",
+        "dog",
+        "deer"
+      ],
+      "avg_win_vs_smart": 0.037,
+      "best_order_smart": [
+        "dog",
+        "snake",
+        "deer"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "dog",
+      "deer"
+    ],
+    "style": "双输出 + 治疗",
+    "synergy": "小猫、小狗负责输出和追击，小鹿治疗被集火的输出位",
+    "plan": "双输出集火，小鹿在输出位掉血 30% 以上时治疗",
+    "beats": [
+      "mouse",
+      "turtle"
+    ],
+    "fears": [
+      "cat",
+      "snake"
+    ],
+    "notes": "对上随机出招的对手很稳；对上会集火的对手，治疗量跟不上",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.219,
+      "avg_win_vs_random": 0.762,
+      "best_order": [
+        "deer",
+        "dog",
+        "cat"
+      ],
+      "best_order_random": [
+        "cat",
+        "dog",
+        "deer"
+      ],
+      "avg_win_vs_smart": 0.0,
+      "best_order_smart": [
+        "cat",
+        "dog",
+        "deer"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "turtle",
+      "deer"
+    ],
+    "style": "单核 + 双保",
+    "synergy": "护盾和治疗一起保小猫，小猫是唯一输出",
+    "plan": "所有保护都给小猫，小猫每回合有能量就放大招",
+    "beats": [
+      "mouse",
+      "rabbit"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "输出严重不足，容易打成平局或被拖死",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.144,
+      "avg_win_vs_random": 0.642,
+      "best_order": [
+        "deer",
+        "cat",
+        "turtle"
+      ],
+      "best_order_random": [
+        "cat",
+        "deer",
+        "turtle"
+      ],
+      "avg_win_vs_smart": 0.0,
+      "best_order_smart": [
+        "cat",
+        "turtle",
+        "deer"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "cat",
+      "snake",
+      "fish"
+    ],
+    "style": "结界 + 收割 + 水链",
+    "synergy": "小鱼水链保护小猫和小蛇，小蛇结界持续伤害，小猫收割",
+    "plan": "小鱼先手水链，小蛇结界，小猫大招",
+    "beats": [
+      "mouse",
+      "rabbit"
+    ],
+    "fears": [
+      "dog",
+      "cat"
+    ],
+    "notes": "三个技能都要 3 豆，开局只有 3 豆，节奏很慢",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.099,
+      "avg_win_vs_random": 0.462,
+      "best_order": [
+        "snake",
+        "cat",
+        "fish"
+      ],
+      "best_order_random": [
+        "snake",
+        "fish",
+        "cat"
+      ],
+      "avg_win_vs_smart": 0.0,
+      "best_order_smart": [
+        "cat",
+        "snake",
+        "fish"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "turtle",
+      "deer",
+      "fish"
+    ],
+    "style": "纯防守拖回合（反例）",
+    "synergy": "护盾、治疗、水链全是防护，三只都没有输出",
+    "plan": "只能拖到 10 回合争取平局",
+    "beats": [
+      "rabbit",
+      "fish"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "不推荐：我方辅助宠物几乎没有攻击，打不死任何对手，最好结果也只是平局",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.1,
+      "avg_win_vs_random": 0.332,
+      "best_order": [
+        "turtle",
+        "fish",
+        "deer"
+      ],
+      "best_order_random": [
+        "turtle",
+        "fish",
+        "deer"
+      ],
+      "avg_win_vs_smart": 0.0,
+      "best_order_smart": [
+        "turtle",
+        "deer",
+        "fish"
+      ],
+      "verified": true
+    }
+  },
+  {
+    "members": [
+      "rabbit",
+      "mouse",
+      "fish"
+    ],
+    "style": "纯功能无输出（反例）",
+    "synergy": "先手、能量、水链都是为输出位服务的，但队伍里没有输出位",
+    "plan": "无法取胜",
+    "beats": [
+      "rabbit",
+      "mouse"
+    ],
+    "fears": [
+      "cat",
+      "dog"
+    ],
+    "notes": "不推荐：没有任何输出，资源无处可用",
+    "evidence": {
+      "source": "matchup-table",
+      "avg_win_vs_field": 0.018,
+      "avg_win_vs_random": 0.075,
+      "best_order": [
+        "rabbit",
+        "mouse",
+        "fish"
+      ],
+      "best_order_random": [
+        "rabbit",
+        "fish",
+        "mouse"
+      ],
+      "avg_win_vs_smart": 0.0,
+      "best_order_smart": [
+        "rabbit",
+        "mouse",
+        "fish"
+      ],
+      "verified": true
+    }
+  }
+]

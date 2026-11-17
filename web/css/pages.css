@@ -1,0 +1,159 @@
+/* 首页、PVE、战斗记录 */
+
+/* ---------- 首页 ---------- */
+
+.home-entries { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.entry {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  text-decoration: none;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.entry:hover { transform: translateY(-2px); box-shadow: 0 6px 22px rgba(40, 30, 10, 0.12); }
+.entry > div:nth-child(2) { flex: 1; }
+.entry h2 { margin-bottom: 4px; }
+.entry-icon { font-size: 42px; line-height: 1; }
+.entry.disabled { opacity: 0.6; }
+
+.roster { margin-top: 6px; }
+.roster-title { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.roster-title b { font-size: 15px; color: var(--side); }
+
+/* ---------- PVE ---------- */
+
+.pve { display: flex; flex-direction: column; gap: 12px; }
+
+.field { display: flex; align-items: flex-start; gap: 12px; }
+.field-label { flex: none; width: 82px; padding-top: 7px; font-weight: 700; color: #5d5a68; }
+
+.seg { display: inline-flex; border: 1px solid #cfc9bb; border-radius: 9px; overflow: hidden; background: #fff; }
+.seg-btn {
+  padding: 7px 16px;
+  border: none;
+  border-right: 1px solid #cfc9bb;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  color: #5d5a68;
+  cursor: pointer;
+}
+.seg-btn:last-child { border-right: none; }
+.seg-btn:hover:not(:disabled):not(.on) { background: #f6f3ec; }
+.seg-btn.on { background: var(--ink); color: #fff; }
+.seg-btn.side-me.on { background: var(--me); }
+.seg-btn.side-opp.on { background: var(--opp); }
+.seg-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.pve-pets { flex: 1; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; }
+.pve-pet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 6px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.pve-pet:hover:not(:disabled) { border-color: var(--side); }
+.pve-pet.on { border-color: var(--side); background: var(--side-soft); box-shadow: 0 0 0 3px color-mix(in srgb, var(--side) 20%, transparent); }
+.pve-pet:disabled { cursor: not-allowed; opacity: 0.6; }
+.pve-pet.on:disabled { opacity: 1; }
+.pve-pet-emoji { font-size: 30px; line-height: 1.1; }
+.pve-pet-name { font-weight: 700; }
+.mini-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 8px; width: 100%; margin-top: 3px; }
+.mini-stat { display: flex; justify-content: space-between; gap: 3px; padding: 0 3px; border-radius: 4px; font-size: 12px; white-space: nowrap; }
+.mini-stat i { font-style: normal; color: var(--muted); }
+.mini-stat.focus { background: #fff3bf; }
+.mini-stat.focus i { color: #7a4f00; }
+
+.pve-dungeons { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.dungeon {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 12px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.dungeon span { font-size: 12.5px; color: var(--muted); }
+.dungeon:hover:not(:disabled) { border-color: #f59f00; }
+.dungeon.on { border-color: #f59f00; background: #fff9db; }
+.dungeon:disabled { cursor: not-allowed; opacity: 0.6; }
+.dungeon.on:disabled { opacity: 1; }
+
+.pve-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 46px;
+  margin-top: 4px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #f6f3ec;
+}
+.count-label { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.count-label input {
+  width: 84px;
+  padding: 7px 8px;
+  border: 1px solid #cfc9bb;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 700;
+}
+.pve-progress { font-weight: 700; }
+.pve-status { padding: 7px 12px; border-radius: 8px; background: var(--me-soft); color: #154c79; font-weight: 600; }
+
+.pve-bottom { display: grid; grid-template-columns: 340px 1fr; gap: 12px; align-items: start; }
+.pve-bottom .panel.grow { min-width: 0; max-height: 420px; overflow: auto; }
+
+.pve-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 2px solid var(--line);
+  background: #faf8f3;
+}
+.pve-result.none, .pve-result.pending { color: var(--muted); text-align: center; padding: 26px 14px; }
+.pve-result.win { border-color: #8ce99a; background: #ebfbee; }
+.pve-result.lose { border-color: #ffc9c9; background: #fff5f5; }
+.pve-result-title { font-size: 19px; font-weight: 800; }
+.pve-result-change { font-size: 16px; font-weight: 700; }
+
+/* ---------- 战斗记录 ---------- */
+
+.detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.detail-head h2 { display: flex; align-items: center; gap: 10px; }
+.detail-lineup { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.detail-lineup b { width: 62px; }
+.detail-log { height: auto; max-height: 62vh; border: 1px solid var(--line); border-radius: 9px; background: #fdfcf9; }
+
+@media (max-width: 1180px) {
+  .home-entries, .pve-bottom { grid-template-columns: 1fr; }
+  .pve-pets { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .pve-dungeons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.mode-tag { align-self: center; padding: 0 7px; border-radius: 999px; background: #efeef2; color: #5f5c6b; font-size: 12px; font-weight: 700; }
+
+/* PVE 只剩一种模式时：直接写出来，不用选 */
+.mode-fixed { display: inline-block; padding: 7px 14px; border-radius: 9px; background: #f6f3ec; font-weight: 600; color: #5d5a68; }

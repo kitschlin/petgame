@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+/data/
+tests/e2e/screenshots/
+tests/e2e/.deps/
+.DS_Store
+.env
+
+# 本地私有 / 开发用，不上传
+AGENTS.md
+AI_COACH_DRAFT.md
+DEV_NOTES.md
+report.zip
+traces/
+tests/
+scripts/
+pytest.ini
+.claude/

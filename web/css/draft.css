@@ -1,0 +1,174 @@
+/* 选将：上方对手方宠物池，中间站位槽，下方我方宠物池 */
+
+.draft { display: flex; flex-direction: column; gap: 8px; }
+
+.draft-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.draft-title { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+.turn-tag {
+  padding: 2px 12px;
+  border-radius: 999px;
+  background: var(--side);
+  color: #fff;
+  font-weight: 700;
+}
+.steps { display: flex; gap: 5px; margin-left: auto; }
+.step {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid var(--side);
+  color: var(--side);
+  font-size: 12.5px;
+  font-weight: 700;
+  opacity: 0.4;
+}
+.step.done { background: var(--side); color: #fff; opacity: 1; }
+.step.now { opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--side) 30%, transparent); }
+
+/* ---------- 宠物池 ---------- */
+
+.pool {
+  padding: 8px 10px 10px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 2px solid var(--line);
+  transition: border-color 0.15s, opacity 0.15s;
+}
+.pool.active { border-color: var(--side); box-shadow: 0 0 0 3px color-mix(in srgb, var(--side) 18%, transparent); }
+.pool.locked .pet-card { opacity: 0.55; filter: saturate(0.6); }
+/* 锁定方的卡片仍可悬停查看技能：悬停时恢复不透明，浮层才看得清 */
+.pool.locked .pet-card:hover, .pool.locked .pet-card.picked { opacity: 1; }
+
+.pool-title { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.pool-title b { font-size: 15px; color: var(--side); }
+.pool-state { margin-left: auto; font-size: 12.5px; color: var(--muted); }
+.pool.active .pool-state { color: var(--side); font-weight: 700; }
+
+.pet-card.available { cursor: grab; }
+.pet-card.available:hover {
+  border-color: var(--side);
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--side) 30%, transparent);
+  transform: translateY(-2px);
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+.pet-card.available:active { cursor: grabbing; }
+.pet-card.placed { outline: 3px solid var(--side); outline-offset: 1px; opacity: 0.6; }
+.pet-card.picked { border-top-color: #c9c5d0; }
+.pet-card.picked > :not(.card-mask):not(.pc-pop) { opacity: 0.35; filter: grayscale(1); }
+
+.card-mask {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 3px 14px 3px 18px;
+  border-radius: 999px;
+  background: rgba(43, 42, 51, 0.82);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 拖拽过程中不弹出技能说明 */
+.draft.dragging .pet-card .pc-pop { display: none; }
+
+/* ---------- 站位槽 ---------- */
+
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: #ebe6da;
+  border: 1px solid var(--line);
+}
+
+.slots { display: flex; align-items: center; gap: 10px; }
+.slots-label { width: 86px; font-weight: 700; color: var(--side); white-space: nowrap; }
+
+.slot {
+  position: relative;
+  flex: 1;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 2px dashed #c9c2b2;
+  background: rgba(255, 255, 255, 0.5);
+}
+.slot-no { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.slot.filled { border: 2px solid var(--side); background: #fff; }
+.slot .pet-chip { font-size: 15px; padding: 3px 12px 3px 6px; }
+.slot .chip-emoji { font-size: 22px; }
+.lock { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+.slot.target {
+  border-color: var(--side);
+  background: var(--side-soft);
+  animation: slot-pulse 1.4s ease-in-out infinite;
+}
+.slot.target.has-pending { border-style: solid; background: #fff; animation: none; }
+.slot.target.over { background: color-mix(in srgb, var(--side) 22%, #fff); transform: scale(1.02); }
+.slot-hint { color: var(--side); font-weight: 700; }
+.pending-pet { cursor: grab; }
+.slot-remove {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: #eee;
+  color: #666;
+  cursor: pointer;
+}
+.slot-remove:hover { background: var(--bad); color: #fff; }
+
+@keyframes slot-pulse {
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--side) 22%, transparent); }
+}
+
+.confirm-row { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 2px 0; }
+.confirm-hint { color: #5d5a68; }
+.confirm-row .btn { min-width: 150px; }
+
+/* ---------- PVP 入口 ---------- */
+
+.start-panel { align-items: center; text-align: center; padding: 48px 24px; gap: 12px; }
+.start-panel h2 { font-size: 24px; }
+.start-panel p { max-width: 560px; }
+
+.mode-label { margin-top: 6px; font-weight: 700; }
+.mode-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 260px)); gap: 12px; }
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.mode-card b { font-size: 15px; }
+.mode-card span { font-size: 12.5px; color: var(--muted); }
+.mode-card:hover { border-color: var(--me); }
+.mode-card.on { border-color: var(--me); background: var(--me-soft); box-shadow: 0 0 0 3px rgba(28, 126, 214, 0.15); }
