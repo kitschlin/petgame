@@ -1,10 +1,13 @@
 """Coach 配置：环境变量优先，其次是项目根目录的 .env（不提交到仓库）。
 
-    DEEPSEEK_API_KEY   LLM 的 key
+    COACH_API_KEY      LLM 的 key（兼容旧名 DEEPSEEK_API_KEY）
     COACH_MODEL        默认 deepseek-flash
-    COACH_BASE_URL     默认 https://api.deepseek.com
+    COACH_BASE_URL     默认 https://api.deepseek.com；任何 OpenAI 兼容的 /chat/completions 都可以，
+                       例如 SiliconFlow：https://api.siliconflow.cn/v1
     COACH_TIMEOUT      单次请求超时（秒），默认 20
-    PETARENA_COACH     off / fake / live；不设置时有 key 为 live，否则 off
+    PETARENA_COACH     off / live（测试另有 fake）；不设置时有 key 为 live，否则 off。
+                       没有 key 时不会退回假模型：AI 军师面板只提示「请配置 API」（setup_needed）；
+                       显式设为 off 时整个 AI Coach 不出现
 
 战斗指导、复盘和培养建议的计算量（都有默认值，一般不用改）：
     COACH_FAST_TIMEOUT      战斗指导单次请求超时（秒），默认 8：每次行动都要等它，不能太久
@@ -21,7 +24,7 @@
     COACH_GROWTH_TARGET     培养建议的目标胜率，默认 0.6
     COACH_SEED              on（默认）/ off：用不用随代码附带的内置经验（离线普查过的「照指导出招」的对阵战绩）
 
-fake 模式不联网，用固定规则出方案，演示和测试用。它还有两个调试开关：
+fake 模式不联网，用固定规则出方案，只给自动化测试用（必须显式设置，永远不会自动启用）。它还有两个调试开关：
     COACH_FAKE_FAILS   每一手的前 N 次请求故意返回无法解析的内容（演示重试）
     COACH_FAKE_DELAY   每次请求先等待这么多秒（演示「思考中」和取消）
 """
@@ -77,6 +80,7 @@ class CoachConfig:
     growth_target: float = 0.6
     growth: str = GROWTH_LIGHT  # 培养建议：light 只按台阶给方向 / full 逐项模拟
     seed: bool = True  # 用不用内置经验（petarena/coach/data/experience-base.json）
+    setup_needed: bool = False  # 没有配置 key 而关闭（不是玩家显式关掉的）：界面上提示去配置 API
 
     @property
     def enabled(self) -> bool:
@@ -116,12 +120,13 @@ def load_config(
             value = file_values.get(name)
         return value.strip() if value and value.strip() else None
 
-    key = get("DEEPSEEK_API_KEY")
+    key = get("COACH_API_KEY") or get("DEEPSEEK_API_KEY")
     mode = (get("PETARENA_COACH") or "").lower()
     if mode not in MODES:
         mode = LIVE if key else OFF
     if mode == LIVE and not key:
-        mode = OFF  # 没有 key 就无法调用真实模型
+        mode = OFF  # 没有 key 就无法调用真实模型（也不退回假模型）
+    setup_needed = mode == OFF and not key and (get("PETARENA_COACH") or "").lower() != OFF
     def number(name: str, default: float) -> float:
         try:
             return float(get(name) or default)
@@ -154,4 +159,5 @@ def load_config(
         growth_target=target if 0 < target < 1 else 0.6,
         growth=growth if growth in GROWTH_MODES else GROWTH_LIGHT,
         seed=(get("COACH_SEED") or "on").lower() not in ("off", "0", "false", "no"),
+        setup_needed=setup_needed,
     )

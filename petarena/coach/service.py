@@ -118,6 +118,7 @@ class CoachService:
             "enabled": self.enabled,
             "mode": self.config.mode,
             "model": self.llm.name if self.llm is not None else None,
+            "setup": self.config.setup_needed,  # 没有配置 API：AI 军师面板提示去配置，不退回假模型
         }
 
     def _token_lock(self, match_id: str, token: str) -> threading.Lock:

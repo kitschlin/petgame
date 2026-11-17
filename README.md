@@ -43,7 +43,7 @@ python run.py --host 0.0.0.0 --port 8000
 
 ## 3. LLM API 的使用方式
 
-AI Coach 通过 **OpenAI 兼容的 `/chat/completions` 接口** 调用大模型，默认接 DeepSeek。**不配置 key 也能完整地玩**，只是没有 AI 面板。
+AI Coach 通过 **OpenAI 兼容的 `/chat/completions` 接口** 调用大模型，默认接 DeepSeek。**不配置 key 也能完整地玩**：AI 军师面板只显示「请先配置 LLM API」和配置方法，不会给任何建议（不会退回假模型）。
 
 1. 复制配置文件：
 
@@ -54,28 +54,30 @@ AI Coach 通过 **OpenAI 兼容的 `/chat/completions` 接口** 调用大模型�
 2. 在 `.env` 里填入自己的 key（`.env` 已在 `.gitignore` 中，不会被提交）：
 
    ```bash
-   DEEPSEEK_API_KEY=sk-xxxxxxxx
+   COACH_API_KEY=sk-xxxxxxxx      # 旧名 DEEPSEEK_API_KEY 仍然有效
    ```
 
 3. 重新运行 `python run.py`，页面上出现 AI 军师 / AI 指导面板即为启用成功。
 
-也可以不写文件，直接用环境变量：`DEEPSEEK_API_KEY=sk-xxx python run.py`（环境变量优先于 `.env`）。
+也可以不写文件，直接用环境变量：`COACH_API_KEY=sk-xxx python run.py`（环境变量优先于 `.env`）。
 
 ### 换用其他模型 / 服务商
 
-只要接口兼容 OpenAI 的 `/chat/completions`，改下面三项即可（key 仍然填在 `DEEPSEEK_API_KEY` 里）：
+只要接口兼容 OpenAI 的 `/chat/completions`，改下面三项即可。例如 SiliconFlow：
 
 ```bash
-DEEPSEEK_API_KEY=<你的 key>
-COACH_BASE_URL=https://api.deepseek.com     # 服务地址
-COACH_MODEL=deepseek-flash                  # 模型名
+COACH_API_KEY=<你的 key>
+COACH_BASE_URL=https://api.siliconflow.cn/v1  # 默认 https://api.deepseek.com
+COACH_MODEL=deepseek-ai/DeepSeek-V3.2         # 默认 deepseek-flash
 ```
+
+客户端按服务商和模型自动选参数：DeepSeek 官方接口用 `thinking: disabled`；SiliconFlow 上的 Qwen3 / Qwen3.5、DeepSeek-V3.1 及以后这类混合思考模型用 `enable_thinking: false`；DeepSeek-R1 这类推理模型关不掉思考，不发 JSON 模式参数、放宽输出上限，靠本地修复解析 JSON（它们很慢，战斗指导的 8 秒超时多半不够，不推荐）。账户余额不足（HTTP 402）和 key 无效一样不自动重试，面板上直接写明原因。
 
 ### 常用开关
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `PETARENA_COACH` | 有 key 为 `live`，否则 `off` | `off` 关闭 AI；`fake` 不联网的假模型（数字照常来自引擎，讲解是套话，适合没有 key 时预览界面）；`live` 调用真实模型 |
+| `PETARENA_COACH` | 有 key 为 `live`，否则 `off` | `off` 整个关闭 AI（连「请配置 API」的提示也不显示）；`live` 调用真实模型。另有 `fake` 只给自动化测试用，必须显式设置，不会自动启用 |
 | `COACH_TIMEOUT` | `20` | 选将、复盘、培养建议单次请求超时（秒） |
 | `COACH_FAST_TIMEOUT` | `8` | 战斗指导单次请求超时（秒） |
 | `COACH_WORKERS` | CPU 核数 − 1，最多 16 | 推演用的进程数；机器配置低时调小 |

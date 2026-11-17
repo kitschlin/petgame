@@ -114,3 +114,27 @@ export function createCoachPanel({ onRetry }) {
   render({ status: 'idle' });
   return { el, render };
 }
+
+// 没有配置 API 时的 AI 军师面板：只提示怎么配置，不给任何建议（不退回假模型）。
+// 用单独的 id（coach-setup），界面导览里讲 AI 军师的那一步因此会略过。
+export function createSetupPanel() {
+  const code = (text) => h('code', { class: 'coach-code' }, text);
+  return {
+    el: h('aside', { class: 'coach-panel draft-coach coach-setup', id: 'coach-setup', dataset: { status: 'setup' } },
+      h('div', { class: 'coach-scroll' },
+        h('div', { class: 'coach-head' },
+          h('b', { class: 'coach-title' }, '🧠 AI 军师'), h('span', { class: 'coach-sub' }, '未配置 API')),
+        h('div', { class: 'coach-body' },
+          h('div', { class: 'coach-empty' }, h('b', {}, '请先配置 LLM API'),
+            h('span', {}, 'AI 军师、AI 指导、AI 复盘都需要一个大模型接口')),
+          h('p', { class: 'coach-setup-step' }, '在项目根目录的 ', code('.env'), ' 里写上（OpenAI 兼容接口即可）：'),
+          h('pre', { class: 'coach-code-block' },
+            'COACH_API_KEY=sk-...\n'
+            + 'COACH_BASE_URL=https://api.siliconflow.cn/v1\n'
+            + 'COACH_MODEL=deepseek-ai/DeepSeek-V3.2'),
+          h('p', { class: 'coach-setup-step' }, '然后重启服务（', code('python run.py'), '）。用 DeepSeek 官方接口时只填 ',
+            code('COACH_API_KEY'), ' 即可。'),
+          h('p', { class: 'coach-note' }, '对局不受影响，你可以完全手动完成选将和战斗')))),
+    render() {},
+  };
+}

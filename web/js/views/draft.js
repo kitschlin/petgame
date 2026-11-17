@@ -5,7 +5,7 @@
 import { api } from '../api.js';
 import { app, SIDE_STYLE } from '../app.js';
 import { createDraftCoach } from '../coach.js';
-import { createCoachPanel } from '../components/coachPanel.js';
+import { createCoachPanel, createSetupPanel } from '../components/coachPanel.js';
 import { fill, h } from '../dom.js';
 import { confirmDialog } from '../components/modal.js';
 import { petCard, petChip } from '../components/petCard.js';
@@ -52,7 +52,7 @@ export function mountDraft(root, onPhaseChange) {
   }
 
   function renderCoach() {
-    if (!coachPanel) return;
+    if (!coachPanel || !coach) return;
     const turn = app.state.match?.draft.turn;
     coachPanel.render(coach.state, turn === 'opp' ? '对手方选择中 · AI 只为我方提供建议' : null);
     highlight();
@@ -90,7 +90,17 @@ export function mountDraft(root, onPhaseChange) {
   const registerTour = () => { if (!unmounted && app.state.phase === 'draft') setPageTour('draft', tourSteps); };
 
   api.coachStatus().then((status) => {
-    if (unmounted || !status.enabled || app.state.phase !== 'draft') { registerTour(); return; }
+    if (unmounted || app.state.phase !== 'draft') { registerTour(); return; }
+    if (!status.enabled) {
+      // 没有配置 API：面板只提示怎么配置；显式关掉 AI Coach 时页面与没有这个功能时完全一致
+      if (status.setup) {
+        coachPanel = createSetupPanel();
+        if (dragging) mountLater = true;
+        else render();
+      }
+      registerTour();
+      return;
+    }
     coachPanel = createCoachPanel({ onRetry: () => coach.retry() });
     coach = createDraftCoach({ onChange: renderCoach });
     // 整页重绘会移除正在拖动的卡片，那次拖拽就落空了：正在拖的话，等它放下或取消之后再把面板画出来

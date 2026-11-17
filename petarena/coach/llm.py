@@ -1,4 +1,4 @@
-"""LLM 客户端：真实接口（httpx → DeepSeek 兼容的 /chat/completions）和 Fake 模式。
+"""LLM 客户端：真实接口（httpx → OpenAI 兼容的 /chat/completions：DeepSeek 官方、SiliconFlow 等）和测试用的 Fake 模式。
 
 调用层只负责「发请求、分类错误」，不关心内容对不对；解析、校验、重试由上层负责。
 """
@@ -45,6 +45,32 @@ class LLM(Protocol):
         """system / user 是两条消息；hint 是同一局势的结构化副本，只有 FakeLLM 使用。"""
 
 
+# SiliconFlow 上支持 enable_thinking 开关的混合思考模型（其余模型不认这个参数）
+_HYBRID_THINKING = ("qwen3", "deepseek-v3.1", "deepseek-v3.2", "deepseek-v4", "glm-4.5", "glm-4.6", "glm-5",
+                    "hunyuan", "hy4", "kimi-k2")
+
+
+def is_reasoner(model: str) -> bool:
+    """只会先思考再回答的推理模型（DeepSeek-R1 一类）：关不掉思考，也不一定支持 JSON 模式。"""
+    name = model.lower()
+    return "-r1" in name or name.endswith("reasoner") or "thinking" in name
+
+
+def provider_options(base_url: str, model: str) -> dict[str, Any]:
+    """不同服务商关闭思考、要求 JSON 输出的写法不同；只放对方认识的参数。"""
+    name = model.lower()
+    options: dict[str, Any] = {}
+    # DeepSeek 官方接口（模型名不带「组织/」前缀，如 deepseek-flash）；SiliconFlow 的模型名都是「组织/模型」
+    if "api.deepseek.com" in base_url or ("/" not in name and name.startswith("deepseek")):
+        # 该模型默认开启思考，必须显式关闭，否则延迟成倍增加
+        options["thinking"] = {"type": "disabled"}
+    elif any(tag in name for tag in _HYBRID_THINKING) and not is_reasoner(model):
+        options["enable_thinking"] = False  # SiliconFlow 等：Qwen3 / DeepSeek-V3.1+ 这类混合思考模型
+    if not is_reasoner(model):
+        options["response_format"] = {"type": "json_object"}  # 推理模型靠提示词 + 本地修复解析 JSON
+    return options
+
+
 class HttpLLM:
     def __init__(self, config: CoachConfig, transport: httpx.BaseTransport | None = None) -> None:
         self.config = config
@@ -56,11 +82,10 @@ class HttpLLM:
         body = {
             "model": config.model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            # 该模型默认开启思考，必须显式关闭，否则延迟成倍增加
-            "thinking": {"type": "disabled"},
-            "response_format": {"type": "json_object"},
+            **provider_options(config.base_url, config.model),
             "temperature": config.temperature,
-            "max_tokens": config.max_tokens,
+            # 推理模型的思考过程也算在输出里：放宽上限，免得答案被截断
+            "max_tokens": config.max_tokens * 4 if is_reasoner(config.model) else config.max_tokens,
         }
         start = time.monotonic()
         try:
@@ -78,6 +103,10 @@ class HttpLLM:
         status = response.status_code
         if status in (401, 403):
             raise LLMError(AUTH, "AI 未配置或 key 无效", False)
+        if status == 402:
+            raise LLMError(AUTH, "AI 账户余额不足（402）：请充值，或在 .env 换一个 key", False)
+        if status == 404 or (status == 400 and "model" in response.text.lower()):
+            raise LLMError(LLM_ERROR, f"AI 服务不认识模型 {config.model}（{status}）：检查 .env 里的 COACH_MODEL", False)
         if status == 429 or status >= 500:
             raise LLMError(LLM_ERROR, f"AI 服务暂时不可用（{status}）", True)
         if status != 200:
