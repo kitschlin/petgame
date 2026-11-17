@@ -9,6 +9,7 @@
 - skill_first：有技能就放，目标挑得有道理（敌方集火血量最少的，己方护盾 / 治疗
   给最需要的，小兔拉攻击最高的队友）。智能对手最初的打法，现在留作对照。
 - expert：对手方「智能模式」现在的打法：逐个推演合法动作，取最好的（见 rollout.py）。
+- uniform：在全部合法动作里等概率随机。逐动作推演时，我方执行完被评估的这一手之后就这样打完。
 """
 
 from __future__ import annotations
@@ -95,6 +96,11 @@ def skill_first(b: Battle, rng: random.Random) -> Move:
     return ("special", min(targets, key=lambda p: ((p.hp + p.shield) / p.max_hp, p.slot)).id)
 
 
+def uniform(b: Battle, rng: random.Random) -> Move:
+    """在全部合法动作（技能 × 目标）里等概率随机选一个。推演里我方执行完这一手之后就这样出招。"""
+    return rng.choice(b.legal_moves())
+
+
 def expert(b: Battle, rng: random.Random) -> Move:
     """推演出招：把每个合法动作各推演若干局（之后双方按常规打法），取最好的。"""
     from .rollout import expert_move  # 延迟导入：推演内核依赖本模块
@@ -106,10 +112,12 @@ HEURISTIC = "heuristic"
 RANDOM_MODE = "random"
 SKILL_FIRST = "skill_first"
 EXPERT = "expert"
+UNIFORM = "uniform"
 
 POLICIES: dict[str, Policy] = {
     HEURISTIC: choose,
     RANDOM_MODE: random_move,
     SKILL_FIRST: skill_first,
     EXPERT: expert,
+    UNIFORM: uniform,
 }

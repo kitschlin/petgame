@@ -404,3 +404,29 @@
   background: #f3f0ff; padding: 1px 5px; border-radius: 4px; }
 .coach-code-block { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5;
   background: #f3f0ff; border-radius: 6px; padding: 4px 10px; margin: 3px 0; white-space: pre-wrap; user-select: all; }
+
+/* Agent 的「思考过程」和选将的 Top10 表：默认折叠 */
+.coach-trace, .coach-top { margin-top: 2px; font-size: 11.5px; color: #4a4855; }
+.coach-trace summary, .coach-top summary { cursor: pointer; color: #5f3dc4; font-weight: 700; }
+.coach-trace ol { margin: 3px 0 0; padding-left: 4px; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.coach-trace li > span:first-child { margin-right: 4px; }
+.coach-trace li b { color: #5f3dc4; }
+.coach-trace li em { margin-left: 4px; padding: 0 4px; border-radius: 3px; background: #ece6fb; font-style: normal; font-size: 10.5px; }
+.coach-trace li i { margin-left: 6px; }
+.coach-trace .trace-thought { color: #4a4855; }
+.coach-trace .trace-result { margin: 1px 0 0 20px; color: var(--muted); white-space: pre-wrap; max-height: 4.5em; overflow: hidden; }
+.coach-trace .trace-tool.failed .trace-result { color: var(--bad); }
+.coach-top table { width: 100%; margin-top: 3px; border-collapse: collapse; }
+.coach-top td { padding: 1px 4px; border-bottom: 1px solid #ece6fb; white-space: nowrap; }
+.coach-top tr.chosen td { background: #ece6fb; font-weight: 700; color: #5f3dc4; }
+.coach-top tr.alt td { color: #5f3dc4; }
+.coach-plan { color: #4a4855; }
+.viz-best { margin-left: 4px; padding: 0 4px; border-radius: 3px; background: #e6fcf5; color: #087f5b; font-style: normal; font-size: 10.5px; }
+
+/* 战斗指导：建议的依据、各动作推演（每行下面一行直接后果） */
+.coach-basis { display: inline-block; margin: 6px 0 0; padding: 1px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 700; }
+.coach-basis.basis-engine { background: #e6fcf5; color: #087f5b; border: 1px solid #96f2d7; }
+.coach-basis.basis-judgment { background: #f3f0ff; color: #5f3dc4; border: 1px solid #d0bfff; }
+.viz-meter.move-meter { grid-template-columns: minmax(0, 1fr) minmax(64px, 30%) 42px; row-gap: 0; }
+.move-facts { grid-column: 1 / -1; font-size: 11.5px; color: var(--muted); line-height: 1.35; white-space: normal; }
+.viz-meter.move-meter .viz-best { margin: 0 4px 0 0; }

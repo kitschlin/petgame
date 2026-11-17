@@ -58,9 +58,6 @@ FRESH = 16  # 最后用新种子重估时每套阵容一共打几局
 KNOWN_CANDIDATES = 3  # 有内置经验的对手：复盘时拿现有证据里最好的这几组成员和实际阵容比
 TOP_UP = 48  # ……一套阵容对上它会遇到的对手阵容，推演过的局数不到这么多就补齐
 LESSON_LIMIT = 4
-PROVEN_LIMIT = 3  # 给 LLM 看几套「推演里胜算最高」的阵容
-PROVEN_GAMES = 32  # 一套阵容对上对手可能的补选，一共推演过这么多局才算数
-PROVEN_COVER = 0.7  # ……而且推演过的那几套对手阵容，要占到它可能补选的这么大比例
 
 
 @dataclass(frozen=True)
@@ -218,40 +215,6 @@ class ExperienceBook:
     def verify(self, pairs: Sequence[tuple[Lineup, Lineup]], games: int) -> list[Any]:
         """复核也要带上修正：否则 decide() 一复核，修正就被没修正的数字覆盖了。"""
         return [self.adjust(my, opp, base) for (my, opp), base in zip(pairs, self.book.verify(pairs, games))]
-
-    # ------------------------------------------------------------ 推演里最好的阵容
-
-    def proven(self, my_picked: Sequence[str], replies_of: Any, limit: int = PROVEN_LIMIT) -> list[dict[str, Any]]:
-        """从当前局面出发，「照指导出招」的整局推演里胜算最高的几套完整阵容，给 LLM 当依据。
-
-        replies_of(阵容) → {对手可能拿出的阵容: 概率}。只算推演得够多的：没推演过的阵容靠借用来估计，
-        可以用来排序，不能当成「推演过」讲给玩家听。同一组成员只留最好的那种站位：LLM 的方案之间成员不能
-        完全相同（站位由引擎去试），几种站位都列出来只会让它交上来一堆重复的方案。
-        """
-        head = tuple(my_picked)
-        mine: dict[Lineup, None] = {}
-        for my, _ in self._guided:
-            if my[:len(head)] == head:
-                mine[my] = None
-        rough = []
-        for lineup in mine:
-            replies = {reply: chance for reply, chance in replies_of(lineup).items() if chance > 0}
-            seen = {reply: chance for reply, chance in replies.items() if self._guided.get((lineup, reply))}
-            cover, games = sum(seen.values()), sum(self._guided[(lineup, reply)] for reply in seen)
-            if cover < PROVEN_COVER or games < PROVEN_GAMES:
-                continue
-            raw = sum(chance * self._scored[(lineup, reply)] / self._guided[(lineup, reply)] for reply, chance in seen.items()) / cover
-            rough.append((raw, lineup, replies, int(games)))
-        rough.sort(key=lambda item: (-item[0], item[1]))
-        groups: set[frozenset] = set()
-        rough = [item for item in rough if frozenset(item[1]) not in groups and not groups.add(frozenset(item[1]))]
-        best = []
-        for _, lineup, replies, games in rough[:2 * limit]:  # 只给最好的几套算修正后的数字（属性有成长时要现场推演表值）
-            pairs = [(lineup, reply) for reply in replies]
-            value = sum(chance * result.win_rate for chance, result in zip(replies.values(), self.get_many(pairs)))
-            best.append({"lineup": list(lineup), "win_rate": round(value, 3), "games": games})
-        best.sort(key=lambda item: (-item["win_rate"], item["lineup"]))
-        return best[:limit]
 
     # ------------------------------------------------------------ 面板上的说明
 

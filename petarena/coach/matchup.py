@@ -182,7 +182,34 @@ def load_base_table(path: str | Path = BASE_TABLE_PATH) -> BaseTable | None:
 
 MAIN = "main"  # 后台和批量任务用的进程池：对阵推演、对局结束后的定向推演
 FAST = "fast"  # 战斗指导用的进程池：玩家正等着，不能排在后台任务后面
-FAST_WORKERS = 8  # 一次建议最多十来个动作，再多的进程也用不上
+FAST_CAP = 64  # 战斗指导的进程池最多开这么多个进程
+ADVICE_GAMES_MIN, ADVICE_GAMES_MAX = 128, 1024  # 战斗指导每个动作推演局数的自动取值范围
+
+
+def fast_workers() -> int:
+    """战斗指导专用进程池的大小：玩家正等着，尽量用上机器的核（留一个给服务），最多 FAST_CAP 个。
+    环境变量 COACH_FAST_WORKERS 可以改。"""
+    try:
+        configured = int(os.environ.get("COACH_FAST_WORKERS", ""))
+    except ValueError:
+        configured = -1
+    if configured >= 1:
+        return configured
+    return max(1, min(FAST_CAP, (os.cpu_count() or 1) - 1))
+
+
+FAST_WORKERS = fast_workers()
+
+
+def auto_advice_games(workers: int | None = None) -> int:
+    """战斗指导每个动作推演几局（没有用 COACH_ADVICE_ROLLOUTS 指定时）：机器越强推演越多。
+
+    每个进程分到大约 16 局（取 64 的整数倍），限制在 128～1024 之间。实测（智能对手的模型最贵）：
+    64 个进程时 1024 局约 2 秒；局数再翻倍到 2048 要 3 秒多，误差只从 ±1.6 降到 ±1.1 个百分点，
+    不值得让玩家多等。手动、随机对手的推演便宜得多，1024 局也只要零点几秒。
+    """
+    workers = FAST_WORKERS if workers is None else workers
+    return max(ADVICE_GAMES_MIN, min(ADVICE_GAMES_MAX, 16 * workers // 64 * 64))
 _pools: dict[str, ProcessPoolExecutor] = {}
 _pool_lock = threading.Lock()
 
@@ -215,7 +242,7 @@ def _get_pool(workers: int, lane: str = MAIN) -> ProcessPoolExecutor:
 
             # spawn：服务是多线程的，不能在持锁状态下 fork
             pool = _pools[lane] = ProcessPoolExecutor(
-                max_workers=min(workers, FAST_WORKERS) if lane == FAST else workers,
+                max_workers=FAST_WORKERS if lane == FAST else workers,
                 mp_context=multiprocessing.get_context("spawn"),
                 initializer=_worker_init, initargs=(os.getpid(),),
             )

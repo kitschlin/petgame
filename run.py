@@ -1,4 +1,4 @@
-"""启动《萌宠竞技场》：python run.py [--port 8000]"""
+"""启动《萌宠竞技场》：python run.py [--port 8765]"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from petarena.store import Store
 def main() -> None:
     parser = argparse.ArgumentParser(description="萌宠竞技场")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="存档目录")
     parser.add_argument("--seed", type=int, default=None, help="固定每场战斗的随机种子（用于测试、复现问题）")
     args = parser.parse_args()

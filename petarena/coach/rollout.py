@@ -1,41 +1,31 @@
 """推演内核：从当前局面出发，逐个评估合法动作。
 
-战斗指导、战后复盘、后台定向推演和对手方「智能模式」的出招共用这一套：
+战斗指导、战后复盘、后台定向推演和对手方「智能模式」的出招共用这一套。我方的评估（战斗指导、复盘）只有一种做法：
 
-    对每个合法动作：克隆局面（换一条随机数序列）→ 执行这个动作 → 双方按各自的
-    常规打法把这一局打完 → 重复若干局，取平均价值
+    对当前宠物的每个合法动作（技能 × 目标，legal_moves()）：
+        克隆局面（换一条随机数序列）→ 执行这个动作
+        → 之后我方每次都在合法动作里等概率随机出招（policy.uniform），对手按它的模型出招
+        → 打完这一局，记结果（赢 1 / 平 0.5 / 输 0）
+    每个动作打 ROLLOUT_GAMES 局，取平均 = 这个动作的价值
 
 - 换种子：推演用的随机数与本局真实的随机数无关（Battle.clone(reseed=...)），所以
   建议不会「预知」之后的冻结、追击、同速结果，也不占用本局的随机数。
 - 配对比较：各个动作共用同一批种子，比较时噪声更小。
-- 价值 = 胜率 + 0.5 × 平局率，站在当前行动宠物所属一方的角度。
+- 价值 = 胜率 + 0.5 × 平局率，站在当前行动宠物所属一方的角度。我方的评估排序只看价值，同分按 legal_moves() 的顺序。
+- 智能对手（它自己出招，以及推演里给它建模的往前看）保留原来的判断方式：价值相同时再比终局优势
+  （双方剩余生命占比之差，赢得越快、输得越慢越好），即 evaluate_moves(..., tiebreak=True)。
+- 我方之后随机出招，所以胜率的绝对值偏低，只用来比较这一手各个动作的好坏。
+
+对手的模型（draft.OpponentProfile.model）保持原样：随机模式 = 它真实的随机打法；手动模式 = 常规打法掺 15% 随机；
+智能模式 = ("reply", 12, "heuristic")，即它接下来 AHEAD 次应对把每个动作各推演 12 局再选，之后按常规打法。
 
 策略描述（spec）是可以直接传给子进程、写进 JSON 的普通数据：
 
-    "heuristic" / "random" / "skill_first" / "expert"   policy.POLICIES 里的策略名
+    "heuristic" / "random" / "skill_first" / "expert" / "uniform"   policy.POLICIES 里的策略名
     ("noisy", 0.15, spec)        以这个概率随机出招，其余时候按 spec 出招（给真人对手建模）
-    ("mix", p, spec_a, spec_b)   每次行动以概率 p 用 spec_a，否则用 spec_b（模拟「部分采纳建议」的玩家）
-    ("rollout", 局数, 自己之后的打法, 对方的打法)   逐动作推演，取最好的
-    ("reply", 局数, spec[, 次数])  往前看：这一方接下来的几次决策（默认 AHEAD 次）会把每个动作各推演这么多局
-                                 再选，之后按 spec 出招。只在逐动作评估（evaluate_moves）里起作用。
-                                 - 描述对方：给智能对手建模（它本来就是这样出招的）。实测全程把它当常规
-                                   打法时，面板上的胜率会明显偏高（0.49 对实际 0.17）。
-                                 - 描述己方：我方接下来的几次行动也按「推演出来的最好动作」来估计，而不是
-                                   按常规打法——需要队友接着配合才有价值的动作（先放水链、先打掉护盾、
-                                   攒能量给队友）不再被低估。
-
-往前看多远是实测定的（基础属性，四组对阵各 220 局，对上智能对手；价值 = 胜率 + 0.5 × 平局率）：
-
-    我方 0 次、对手 1 次（第二期最初的做法）   0.448
-    我方 1 次、对手 1 次                    0.476
-    我方 2 次、对手 2 次                    0.500
-    我方 3 次、对手 3 次（现在的做法）        0.527      其中「小狗、小鱼、小猫」这套从 0.56 到 0.79
-    我方 4 次、对手 4 次                    0.545
-    我方 6 次、对手 6 次                    0.539
-
-    双方各 3 只宠物，「各 3 次」大约就是把接下来的一整轮看完；再深就没有可见的提高了，计算量却一直涨。
-    而只是把每个动作多推演几局（16 / 24 / 48 / 96 局）没有任何提高：瓶颈在「后续怎么打」的假设，不在抽样噪声。
-    同一个局面只推演一次（按局面缓存），所以代价大约是不往前看时的 4 倍，而不是几十倍。
+    ("rollout", 局数, 自己之后的打法, 对方的打法)   逐动作推演，取最好的（「照指导出招」的整局模拟）
+    ("reply", 局数, spec[, 次数])  只用来描述对手：它接下来的几次决策（默认 AHEAD 次）会把每个动作各推演
+                                 这么多局再选，之后按 spec 出招。只在逐动作评估（evaluate_moves）里起作用。
 """
 
 from __future__ import annotations
@@ -47,28 +37,25 @@ from typing import Any, Iterable, Sequence
 
 from ..engine import Battle
 from ..engine.pets import DOG_PURSUIT_CHANCE
-from .matchup import FAST, MAIN, Roster, _get_pool, _lineup, shutdown_pool
-from .policy import HEURISTIC, POLICIES, Move, Policy
+from .matchup import FAST, FAST_WORKERS, MAIN, Roster, _get_pool, _lineup, shutdown_pool
+from .policy import HEURISTIC, POLICIES, UNIFORM, Move, Policy
 
 Spec = Any
 
 NOISY = "noisy"
-MIX = "mix"
 ROLLOUT = "rollout"
 REPLY = "reply"
 
-ROLLOUT_GAMES = 24  # 战斗指导、复盘时每个动作推演几局
+ROLLOUT_GAMES = 128  # 复盘时每个动作推演几局（战斗指导的局数由 config / matchup.auto_advice_games 决定）
 EXPERT_GAMES = 16  # 智能对手出招时每个动作推演几局
 REPLY_GAMES = 12  # 给「对手接下来的应对」建模时，它的每个动作推演几局
-AHEAD = 3  # 往前看几次决策（双方各自）：大约是接下来的一整轮。("reply", …) 里没写次数时就用它
-OWN_GAMES = 8  # 给「我方接下来的行动」建模时，每个动作推演几局
-OWN = (REPLY, OWN_GAMES, HEURISTIC)  # 逐动作评估时对我方后续出招的假设：战斗指导、复盘、整局模拟都用它
+AHEAD = 3  # 对手往前看几次决策：大约是接下来的一整轮。("reply", …) 里没写次数时就用它
+OWN = UNIFORM  # 逐动作评估时我方之后的打法：战斗指导、复盘、整局模拟都用它
 NEAR_MARGIN = 0.10  # 价值与最优相差超过这么多的动作一定不是「候选」
-NEAR_SIGMA = 0.5  # ……而且相差不能超过这么多倍的标准误（逐局配对）：接近必胜或必败时，差一局也是实打实的差别
-NEAR_EDGE = 0.05  # 价值完全相同时，终局优势（双方剩余生命占比之差、快慢）也不能比最优差这么多
+NEAR_SIGMA = 0.5  # ……而且相差不能超过这么多倍的标准误（逐局配对）
 NEAR_CAP = 3  # 候选最多几个
 HUMAN_NOISE = 0.15  # 给真人对手建模时掺入的随机出招比例
-TEMPO = 0.002  # 价值相同时偏好「赢得快、输得慢」：每多一次行动折算成这么多的血量差
+TEMPO = 0.002  # 智能对手：价值相同时偏好「赢得快、输得慢」，每多一次行动折算成这么多的血量差
 
 _ME_SALT = 0x9E3779B9  # 双方用不同的随机数序列：我方换打法不会改变对手方的随机选择
 
@@ -90,14 +77,10 @@ def resolve(spec: Spec) -> Policy:
             return inner(b, rng)
 
         return noisy
-    if kind == MIX:
-        _, chance, first, second = spec
-        a, b_ = resolve(first), resolve(second)
-        return lambda b, rng: (a if rng.random() < chance else b_)(b, rng)
     if kind == ROLLOUT:
         _, games, own, other = spec
         return lambda b, rng: rollout_move(b, rng, own=own, other=other, games=games)
-    if kind == REPLY:  # 「下一次应对」由 evaluate_moves 处理；除此之外就是后面那个打法
+    if kind == REPLY:  # 「接下来几次应对」由 evaluate_moves 处理；除此之外就是后面那个打法
         return resolve(spec[2])
     raise ValueError(f"未知的策略描述：{spec!r}")
 
@@ -112,18 +95,8 @@ def human(base: Spec = HEURISTIC) -> tuple:
     return (NOISY, HUMAN_NOISE, base)
 
 
-def answering(base: Spec = HEURISTIC, games: int = REPLY_GAMES) -> tuple:
-    """会推演的对手：接下来的几次应对用推演选，之后按 base 出招。"""
-    return (REPLY, games, base)
-
-
-def partly(chance: float, model: Spec = HEURISTIC) -> tuple:
-    """以 chance 的概率照指导出招、其余时候按常规打法的玩家。"""
-    return (MIX, chance, guided(model), HEURISTIC)
-
-
 def _ahead_salt(salt: int | str, key: tuple) -> str:
-    """往前看时用哪一批种子：只取决于局面本身，所以各个动作可以分给不同的进程去算，结果与顺序无关。"""
+    """对手往前看时用哪一批种子：只取决于局面本身，所以各个动作可以分给不同的进程去算，结果与顺序无关。"""
     return f"{salt}|ahead|{zlib.crc32(repr(key).encode())}"
 
 
@@ -136,8 +109,8 @@ class MoveValue:
     win: int
     draw: int
     games: int
-    margin: float  # 终局优势：双方剩余生命占比之差，赢得越快越高、输得越慢越高。价值相同时的第二排序依据
     outcomes: tuple[float, ...]  # 每一局的结果（1 / 0.5 / 0），与其他动作逐局配对
+    margin: float = 0.0  # 终局优势，只有 tiebreak=True（智能对手）时才算；价值相同时的第二排序依据
 
     @property
     def win_rate(self) -> float:
@@ -158,7 +131,7 @@ def _health(b: Battle, side: str) -> float:
 
 
 def _state_key(b: Battle) -> tuple:
-    """局面的指纹：对手的应对只取决于它，同一个局面只推演一次。"""
+    """局面的指纹：对手往前看时，同一个局面只推演一次。"""
     teams = []
     for team in b.teams.values():
         barrier, chain = team.barrier, team.chain
@@ -173,27 +146,25 @@ def _state_key(b: Battle) -> tuple:
 
 def evaluate_moves(
     battle: Battle, *, own: Spec = HEURISTIC, other: Spec = HEURISTIC, games: int = ROLLOUT_GAMES,
-    salt: int | str = 0, moves: Iterable[Move] | None = None, start: int = 0,
+    salt: int | str = 0, moves: Iterable[Move] | None = None, start: int = 0, tiebreak: bool = False,
 ) -> list[MoveValue]:
     """逐个评估当前行动宠物的合法动作（或指定的几个动作），顺序与 legal_moves() 一致。
 
-    own 是这一方之后的打法，other 是对方的打法。salt 决定用哪一批种子：同一个 salt
-    得到同样的结果；换一个 salt（或 start）就是一批没用过的新种子。
-    own / other 是 ("reply", …) 时，每一局里这一方接下来的几次决策用推演来选（见模块说明）；
-    战斗指导和复盘传 own=OWN。不传就是常规打法：智能对手自己出招、以及往前看时的内层推演都是这样。
+    tiebreak=True 时另算终局优势（margin），价值相同时 rank 用它排先后：智能对手的判断方式。
+
+    own 是这一方执行完这个动作之后的打法（战斗指导、复盘传 OWN，即等概率随机），other 是对方的打法。
+    other 是 ("reply", …) 时，对方接下来的几次决策用推演来选（智能对手的模型）。
+    salt 决定用哪一批种子：同一个 salt 得到同样的结果；换一个 salt（或 start）就是一批没用过的新种子。
     """
     side = battle.pets[battle.actor].side
     foe = Battle.enemy(side)
-    policies = {side: resolve(own), foe: resolve(other)}
-
-    def looks_ahead(spec: Spec) -> tuple[int, int]:
-        """("reply", 局数, 之后的打法[, 几次]) → (每个动作推演几局, 接下来几次决策用推演来选)。"""
-        if isinstance(spec, str) or spec[0] != REPLY:
-            return 0, 0
-        return spec[1], (spec[3] if len(spec) > 3 else AHEAD)
-
-    depth = {foe: looks_ahead(other), side: looks_ahead(own)}
-    replies: dict[tuple, Move] = {}
+    mine = resolve(own)
+    theirs = resolve(other)
+    if isinstance(other, str) or other[0] != REPLY:
+        reply_games, reply_times = 0, 0
+    else:
+        reply_games, reply_times = other[1], (other[3] if len(other) > 3 else AHEAD)
+    replies: dict[tuple, Move] = {}  # 对手往前看：局面 → 它选的动作
     seeds = _seeds(salt, games, start)
     done = len(battle.actions)
     result = []
@@ -204,26 +175,28 @@ def evaluate_moves(
             sim = battle.clone(reseed=seed)
             rng = random.Random(seed)
             sim.act(*move)
-            left = {who: times for who, (_, times) in depth.items()}  # 双方各还有几次决策要用推演来选
+            left = reply_times  # 对手还有几次决策要用推演来选
             while not sim.finished:
-                actor = sim.pets[sim.actor].side
-                if left[actor]:
-                    left[actor] -= 1
+                if sim.pets[sim.actor].side == side:
+                    sim.act(*mine(sim, rng))
+                elif left:
+                    left -= 1
                     key = _state_key(sim)
                     if key not in replies:
                         options = sim.legal_moves()
                         replies[key] = options[0] if len(options) == 1 else rank(evaluate_moves(
-                            sim, games=depth[actor][0], salt=_ahead_salt(salt, key), moves=options))[0].move
+                            sim, games=reply_games, salt=_ahead_salt(salt, key), moves=options, tiebreak=True))[0].move
                     sim.act(*replies[key])
                 else:
-                    sim.act(*policies[actor](sim, rng))
+                    sim.act(*theirs(sim, rng))
             outcome = 1.0 if sim.winner == side else 0.5 if sim.winner == "draw" else 0.0
             outcomes.append(outcome)
-            margin += _health(sim, side) - _health(sim, foe) - TEMPO * (2 * outcome - 1) * (len(sim.actions) - done)
+            if tiebreak:
+                margin += _health(sim, side) - _health(sim, foe) - TEMPO * (2 * outcome - 1) * (len(sim.actions) - done)
         win, draw = outcomes.count(1.0), outcomes.count(0.5)
         result.append(MoveValue(
             move=tuple(move), value=(win + 0.5 * draw) / games, win=win, draw=draw, games=games,
-            margin=margin / games, outcomes=tuple(outcomes),
+            outcomes=tuple(outcomes), margin=margin / games,
         ))
     return result
 
@@ -235,41 +208,58 @@ def _explicit(spec: Spec) -> Spec:
     return spec
 
 
+GAMES_PER_JOB = 64  # 逐动作评估交给进程池时，每个任务推演几局：一个动作的局数拆成几份，分给更多的进程
+
+
 def _evaluate_one(job: tuple) -> MoveValue:
-    """进程池任务：评估一个动作。"""
+    """进程池任务：评估一个动作的一段局（种子编号 start 起的 games 局）。"""
     battle, move, own, other, games, salt, start = job
     return evaluate_moves(battle, own=own, other=other, games=games, salt=salt, moves=[move], start=start)[0]
+
+
+def _merge(parts: Sequence[MoveValue]) -> MoveValue:
+    """把同一个动作的几段局合起来：等同于一次推演全部局（种子按编号连续）。"""
+    games = sum(part.games for part in parts)
+    win, draw = sum(part.win for part in parts), sum(part.draw for part in parts)
+    return MoveValue(
+        move=parts[0].move, value=(win + 0.5 * draw) / games, win=win, draw=draw, games=games,
+        outcomes=tuple(outcome for part in parts for outcome in part.outcomes),
+        margin=sum(part.margin * part.games for part in parts) / games,
+    )
 
 
 def evaluate_all(
     battle: Battle, *, own: Spec = OWN, other: Spec = HEURISTIC, games: int = ROLLOUT_GAMES,
     salt: int | str = 0, moves: Iterable[Move] | None = None, start: int = 0, workers: int = 0, lane: str = FAST,
 ) -> list[MoveValue]:
-    """evaluate_moves 的并行版本：每个动作一个任务，交给进程池（默认是战斗指导专用的那条通道）。
-    结果与单进程完全相同（各个动作互不影响，往前看用的种子只取决于局面）。workers <= 1 时就在当前线程里算。"""
+    """evaluate_moves 的并行版本：每个动作的局数拆成 GAMES_PER_JOB 局一份，交给进程池（默认是战斗指导专用的
+    那条通道），再按动作合起来。结果与单进程完全相同（各局的种子只取决于编号，往前看用的种子只取决于局面）。
+    workers <= 1 时就在当前线程里算。"""
     moves = [tuple(move) for move in (battle.legal_moves() if moves is None else moves)]
-    if workers > 1 and len(moves) > 1:
-        jobs = [(battle, move, _explicit(own), _explicit(other), games, salt, start) for move in moves]
-        return pool_map(_evaluate_one, jobs, workers, lane)
+    if workers > 1 and (len(moves) > 1 or games > GAMES_PER_JOB):
+        own, other = _explicit(own), _explicit(other)
+        jobs, owners = [], []
+        for index, move in enumerate(moves):
+            for at in range(0, games, GAMES_PER_JOB):
+                jobs.append((battle, move, own, other, min(GAMES_PER_JOB, games - at), salt, start + at))
+                owners.append(index)
+        parts: list[list[MoveValue]] = [[] for _ in moves]
+        for index, part in zip(owners, pool_map(_evaluate_one, jobs, workers, lane)):
+            parts[index].append(part)
+        return [_merge(chunks) for chunks in parts]
     return evaluate_moves(battle, own=own, other=other, games=games, salt=salt, moves=moves, start=start)
 
 
 def rank(values: Sequence[MoveValue]) -> list[MoveValue]:
-    """从好到差：先看价值，再看终局血量差，最后按原顺序（结果确定）。"""
+    """从好到差：先看价值，再看终局优势（只有智能对手的评估算了它，我方的都是 0），最后按原顺序（结果确定）。"""
     order = sorted(range(len(values)), key=lambda i: (-values[i].value, -values[i].margin, i))
     return [values[i] for i in order]
 
 
-def near_best(values: Sequence[MoveValue], margin: float = NEAR_MARGIN, cap: int = NEAR_CAP,
-              edge: float = NEAR_EDGE) -> list[MoveValue]:
-    """候选动作：推演结果与最优分不出高下的前几个。LLM 只能在这里面选，所以要保证「随便选哪个都不亏」。
+def near_best(values: Sequence[MoveValue], margin: float = NEAR_MARGIN, cap: int = NEAR_CAP) -> list[MoveValue]:
+    """候选动作：推演结果与最优分不出高下的前几个（面板上标「与最优相当」）。
 
-    - 价值有差别的：差距不超过 margin，也不超过半个标准误（各动作用同一批种子，逐局相减）。胜率在中间
-      时这大约是 24 局里差 1 局；接近必胜或必败时标准误很小，差 1 局也不算分不出高下。
-    - 价值完全相同的（推演里全胜或全负的局面很常见）：终局优势不能差出 edge——这种局面里动作之间
-      的区别全在「赢多少血、输得多慢」上。
-
-    实测只按「价值相差不到 10 个百分点」来定候选时，在候选里随便选会把对上智能对手的胜率从 8% 掉到 1%。
+    差距不超过 margin，也不超过半个标准误（各动作用同一批种子，逐局相减）。
     """
     ranked = rank(values)
     best = ranked[0]
@@ -277,7 +267,7 @@ def near_best(values: Sequence[MoveValue], margin: float = NEAR_MARGIN, cap: int
     def close(value: MoveValue) -> bool:
         gap = best.value - value.value
         if gap <= 1e-9:
-            return best.margin - value.margin <= edge + 1e-9
+            return True
         return gap <= margin + 1e-9 and gap <= NEAR_SIGMA * paired_diff(best, value)[1] + 1e-9
 
     return [value for value in ranked if close(value)][:cap]
@@ -296,19 +286,20 @@ def paired_diff(a: MoveValue, b: MoveValue) -> tuple[float, float]:
 
 def rollout_move(
     battle: Battle, rng: random.Random, *, own: Spec = HEURISTIC, other: Spec = HEURISTIC,
-    games: int = ROLLOUT_GAMES,
+    games: int = ROLLOUT_GAMES, tiebreak: bool = False,
 ) -> Move:
     """推演出招：逐个评估合法动作，取最好的。只有一个合法动作时不用推演。"""
     moves = battle.legal_moves()
     if len(moves) == 1:
         return moves[0]
-    values = evaluate_moves(battle, own=own, other=other, games=games, salt=rng.getrandbits(32), moves=moves)
+    values = evaluate_moves(battle, own=own, other=other, games=games, salt=rng.getrandbits(32), moves=moves,
+                            tiebreak=tiebreak)
     return rank(values)[0].move
 
 
 def expert_move(battle: Battle, rng: random.Random) -> Move:
-    """对手方「智能模式」的出招（policy.EXPERT）。"""
-    return rollout_move(battle, rng, games=EXPERT_GAMES)
+    """对手方「智能模式」的出招（policy.EXPERT）：价值相同时比终局优势（它原来的判断方式）。"""
+    return rollout_move(battle, rng, games=EXPERT_GAMES, tiebreak=True)
 
 
 # ---------------------------------------------------------------- 动作的直接后果
@@ -437,7 +428,7 @@ def pool_map(fn, jobs: Sequence[Any], workers: int = 0, lane: str = MAIN) -> lis
         try:
             pool = _get_pool(workers, lane)
             results: list[Any] = []
-            wave = workers * 2
+            wave = (FAST_WORKERS if lane == FAST else workers) * 2  # 战斗指导的通道是专用的，一波塞满它
             for at in range(0, len(jobs), wave):
                 results.extend(pool.map(fn, jobs[at:at + wave]))
             return results
@@ -455,7 +446,7 @@ def warm_up(workers: int) -> None:
     不然第一次请求建议时，玩家要多等这一两秒。失败了就算了，用到时会再试。"""
     if workers > 1:
         try:
-            list(_get_pool(workers, FAST).map(_ready, range(2 * min(workers, 8))))
+            list(_get_pool(workers, FAST).map(_ready, range(2 * FAST_WORKERS)))
         except Exception:
             pass
 

@@ -2,8 +2,11 @@
 
 每一次建议请求（选将 / 战斗）都是同一个流程：
 
-    快照（加锁读取局势，立即放锁）→ 校验 token → 引擎 + LLM（都在锁外）
+    快照（加锁读取局势，立即放锁）→ 校验 token → 引擎事实 + Agent（都在锁外）
     → 再次校验 token → 缓存、写日志、返回
+
+选将、战斗由 Agent 完成（agentic/）：LLM 调用工具（经验检索、引擎推演），最后提交建议，guard 校验。
+选将的 Top10 阵容表、战斗的推演都按 token 缓存：自动 / 手动重试只重新请 LLM，不重算。
 
 对局结束后的工作在后台按顺序进行（见 process）：
 
@@ -23,10 +26,17 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
+
 from . import battle as battle_advice
 from . import experience, growth, review, rollout
+from .agentic import runtime
+from .agentic.battle_agent import SESSION, BattleAgent, BattleSession, LastAdvice
+from .agentic.draft_agent import DraftAgent
+from .agentic.draft_context import Row, top_lineups
 from .config import BACKGROUND, FAKE, GROWTH_FULL, LIVE, OFF, CoachConfig
-from .draft import PREDICTED, AdviceFailure, DraftAdvisor, Situation, profile_for, reply_model_for
+from .draft import PREDICTED, AdviceFailure, Situation, profile_for, reply_model_for
 from .experience import ExperienceBook
 from .jobs import InlineRunner, ThreadRunner
 from .knowledge import KnowledgeBase
@@ -81,8 +91,9 @@ class CoachService:
         elif llm is None and config.mode == FAKE:
             llm = fast = FakeLLM(self.knowledge, fail_first=config.fake_fails, delay=config.fake_delay)
         self.llm = llm
-        self.advisor = DraftAdvisor(llm, self.knowledge) if llm is not None else None
-        self.battle_advisor = battle_advice.BattleAdvisor(fast) if fast is not None else None
+        self.advisor = DraftAgent(llm, self.knowledge) if llm is not None else None
+        battle_budget = runtime.Budget(calls=4, seconds=max(10.0, 1.8 * config.fast_timeout), max_tokens=config.fast_tokens)
+        self.battle_agent = BattleAgent(fast, config.battle_agent, battle_budget) if fast is not None else None
         self.review_advisor = review.ReviewAdvisor(llm) if llm is not None else None
         self.growth_advisor = growth.GrowthAdvisor(llm) if llm is not None else None
         self.data_dir = Path(game.store.root) / "coach"
@@ -95,7 +106,12 @@ class CoachService:
         self._results: dict[str, dict[str, Any]] = {}  # token → 成功结果
         self._feedback: dict[str, str] = {}  # token → 最近一次的错误反馈
         self._token_locks: dict[str, threading.Lock] = {}
-        self._evals: dict[str, battle_advice.Evaluation] = {}  # token → 引擎对这次行动的评估
+        self._evals: dict[tuple[str, int], Future] = {}  # (token, 局数) → 引擎对这次行动的评估（后台算，先到先用）
+        self._tops: dict[str, tuple[list[Row], bool]] = {}  # token → 选将的 Top10 阵容表
+        self._last: LastAdvice | None = None  # 本局上一次交给玩家的战斗建议
+        self._seen = 0  # 本局已经告诉战斗 Agent 的事件数
+        self._session: BattleSession | None = None  # 会话模式：本局的整段对话
+        self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="coach-eval")
         self._queued: set[str] = set()  # 正在后台处理的对局
         self._long_feedback: dict[str, str] = {}  # 复盘讲解、培养建议的错误反馈（不随对局清空）
         self._growth_lock = threading.Lock()
@@ -129,6 +145,8 @@ class CoachService:
                 self._feedback.clear()
                 self._token_locks.clear()
                 self._evals.clear()
+                self._tops.clear()
+                self._last, self._seen, self._session = None, 0, None
             return self._token_locks.setdefault(token, threading.Lock())
 
     # ------------------------------------------------------------ 选将建议
@@ -146,29 +164,34 @@ class CoachService:
             with self._lock:
                 cached = self._results.get(token)
                 feedback = self._feedback.get(token)
+                top = self._tops.get(token)
             if cached is not None:
                 return cached
 
             situation = Situation.from_snapshot(snap)
             profile = profile_for(situation.opponent)
             started = time.monotonic()
+            # 对阵表叠加经验（内置的 + 这位玩家自己打出来的）：Top10 的每个数字都按「照指导出招、这类对手」修正过
+            book = ExperienceBook(self._book_for(situation.roster, profile.opp_policy), self.memory, situation.opponent,
+                                  seed=self._seed(situation.opponent))
             try:
-                # 对阵表叠加经验（内置的 + 这位玩家自己打出来的）：军师看到的每个数字都按「照指导出招、这类对手」修正过
-                book = ExperienceBook(self._book_for(situation.roster, profile.opp_policy), self.memory, situation.opponent,
-                                      seed=self._seed(situation.opponent))
-                prior = None if book.complete else self._prior(book.opp_policy)
-                if prior is not None and book.active:
-                    # 属性有成长时，基础属性的表只用来挑出值得现场推演的阵容；它也要带上经验，
-                    # 否则对智能对手挑出来的全是「表上好看、照指导打不赢」的阵容
-                    prior = ExperienceBook(prior, self.memory, situation.opponent, seed=self._seed(situation.opponent))
-                notes = {
-                    "proven": book.proven(situation.my_picked, reply_model_for(profile, situation.opp_picked)),
-                    "lessons": experience.relevant_lessons(self.memory, situation.opponent,
-                                                           situation.my_picked, situation.opp_picked),
-                    "record": experience.real_record(self.memory, situation.opponent),
-                }
-                result = self.advisor.advise(situation, book, attempt=attempt, feedback=feedback, prior=prior,
-                                             experience=notes)
+                if top is None:  # Top10 只算一次：重试只是重新请 LLM
+                    prior = None if book.complete else self._prior(book.opp_policy)
+                    if prior is not None and book.active:
+                        # 属性有成长时，基础属性的表只用来挑出值得现场推演的阵容；它也要带上经验，
+                        # 否则对智能对手挑出来的全是「表上好看、照指导打不赢」的阵容
+                        prior = ExperienceBook(prior, self.memory, situation.opponent, seed=self._seed(situation.opponent))
+                    top = top_lineups(situation, book, profile, self.knowledge, prior)
+                    book.save()
+                    with self._lock:
+                        if self._match_id == snap["match_id"]:
+                            self._tops[token] = top
+                engine_ms = int((time.monotonic() - started) * 1000)
+                rows, exhaustive = top
+                result = self.advisor.advise(
+                    situation, profile, rows, memory=self.memory,
+                    record=experience.real_record(self.memory, situation.opponent),
+                    attempt=attempt, feedback=feedback, exhaustive=exhaustive)
             except LLMError as error:
                 self._log(token, attempt, ok=False, code=error.code, message=error.message)
                 return _fail(token, error.code, error.message, error.retryable)
@@ -176,22 +199,22 @@ class CoachService:
                 with self._lock:
                     if error.feedback and self._match_id == snap["match_id"]:
                         self._feedback[token] = error.feedback
-                self._log(token, attempt, ok=False, code=error.code, message=error.message, dropped=error.dropped)
+                self._log(token, attempt, ok=False, code=error.code, message=error.message, feedback=error.feedback)
                 return _fail(token, error.code, error.message, error.retryable)
 
             if self.game.coach_token() != token:  # 计算期间玩家已经操作：丢弃
                 self._log(token, attempt, ok=False, code=STALE)
                 return _fail(token, STALE)
             replies = reply_model_for(profile, situation.opp_picked)(tuple(result.advice["plan"]))
-            result.evidence["experience"] = {**book.explain(result.advice["plan"], replies),
-                                             "lessons": len(notes["lessons"])}
+            lessons = experience.relevant_lessons(self.memory, situation.opponent, situation.my_picked, situation.opp_picked)
+            result.evidence["experience"] = {**book.explain(result.advice["plan"], replies), "lessons": len(lessons)}
             response = {
                 "ok": True,
                 "token": token,
                 "advice_id": "adv_" + secrets.token_hex(4),
                 "advice": result.advice,
                 "evidence": result.evidence,
-                "trace": {**result.trace, "total_ms": int((time.monotonic() - started) * 1000)},
+                "trace": {**result.trace, "engine_ms": engine_ms, "total_ms": int((time.monotonic() - started) * 1000)},
             }
             with self._lock:
                 if self._match_id == snap["match_id"]:
@@ -200,10 +223,9 @@ class CoachService:
                                     {"pet": result.advice["pet"], "plan": result.advice["plan"]},
                                     result.evidence["chosen"]["win_rate"])
             self._log(token, attempt, ok=True, pet=result.advice["pet"], plan=result.advice["plan"],
-                      source=result.advice["source"], robust=result.evidence["chosen"]["robust"],
-                      **{key: result.trace[key] for key in (
-                          "plans", "valid", "dropped", "matchups", "cache_hits", "llm_ms", "engine_ms",
-                          "usage", "chosen_llm_rank", "engine_better", "reordered")})
+                      chosen=result.evidence["chosen"]["id"], win_rate=result.evidence["chosen"]["win_rate"],
+                      **{key: response["trace"][key] for key in ("llm_calls", "llm_ms", "tool_ms", "engine_ms", "usage")},
+                      tools=[step["tool"] for step in result.trace["steps"] if step["kind"] == "tool"])
             return response
 
     def note_pick(self, token: str | None, side: str, species: str) -> None:
@@ -221,6 +243,28 @@ class CoachService:
 
     # ------------------------------------------------------------ 战斗指导
 
+    def _evaluation(self, snap: dict[str, Any], games: int) -> Future:
+        """这次行动的引擎评估（后台线程计算，同一个 token 和局数只算一次）。"""
+        key = (snap["token"], games)
+        with self._lock:
+            future = self._evals.get(key)
+            if future is None:
+                battle = snap["battle"].clone()  # 推演用自己的副本，不和 Agent 读局面的那份共用
+                profile = profile_for(snap["opponent"])
+                future = self._pool.submit(battle_advice.evaluate, {**snap, "battle": battle}, profile, games,
+                                           self._workers)
+                if self._match_id == snap["match_id"]:
+                    self._evals[key] = future
+        return future
+
+    def _note_eval(self, snap: dict[str, Any], evaluation: battle_advice.Evaluation) -> None:
+        """推演结果随对局记录保存（留给复盘复用）。"""
+        self.game.coach_note_eval(snap["token"], {
+            "games": evaluation.games, "salt": snap["token"],
+            "moves": [{"skill": value.move[0], "target": value.move[1], "value": round(value.value, 4),
+                       "win": value.win, "draw": value.draw, "games": value.games} for value in evaluation.ranked],
+        })
+
     def battle(self, token: str, attempt: int = 1) -> dict[str, Any]:
         if not self.enabled:
             return _fail(token, DISABLED)
@@ -234,19 +278,35 @@ class CoachService:
             with self._lock:
                 cached = self._results.get(token)
                 feedback = self._feedback.get(token)
-                evaluation = self._evals.get(token)
+                last, seen = self._last, self._seen
+                session = self._session
+                if session is None and self.battle_agent.mode == SESSION:
+                    session = self._session = BattleSession(snap["match_id"], rebuilt=bool(snap.get("marks")))
             if cached is not None:
                 return cached
 
             profile = profile_for(snap["opponent"])
             started = time.monotonic()
+            budget = self.battle_agent.budget
+
+            def evaluate() -> battle_advice.Evaluation:
+                """全部合法动作的推演（同一次行动只算一次，重试时直接复用）。LLM 要等它算完才开始。"""
+                try:
+                    evaluation = self._evaluation(snap, self.config.advice_games).result(timeout=budget.seconds)
+                except FutureTimeout:
+                    raise AdviceFailure("timeout", "推演超时") from None
+                self._note_eval(snap, evaluation)
+                return evaluation
+
+            def remember(advice: LastAdvice, events: int) -> None:
+                with self._lock:
+                    if self._match_id == snap["match_id"]:
+                        self._last, self._seen = advice, events
+
             try:
-                if evaluation is None:  # 引擎评估只做一次：重试只是重新请 LLM 选择和讲解
-                    evaluation = battle_advice.evaluate(snap, profile, self.config.advice_games, self._workers)
-                    with self._lock:
-                        if self._match_id == snap["match_id"]:
-                            self._evals[token] = evaluation
-                result = self.battle_advisor.advise(snap, evaluation, profile, attempt=attempt, feedback=feedback)
+                result = self.battle_agent.advise(
+                    snap, profile, evaluate, memory=self.memory, last=last, seen=seen, session=session,
+                    attempt=attempt, feedback=feedback, on_commit=remember)
             except LLMError as error:
                 self._log(token, attempt, file="battle_log.jsonl", ok=False, code=error.code, message=error.message)
                 return _fail(token, error.code, error.message, error.retryable)
@@ -254,12 +314,14 @@ class CoachService:
                 with self._lock:
                     if error.feedback and self._match_id == snap["match_id"]:
                         self._feedback[token] = error.feedback
-                self._log(token, attempt, file="battle_log.jsonl", ok=False, code=error.code, message=error.message)
+                self._log(token, attempt, file="battle_log.jsonl", ok=False, code=error.code, message=error.message,
+                          feedback=error.feedback)
                 return _fail(token, error.code, error.message, error.retryable)
 
-            if self.game.coach_token() != token:  # 计算期间玩家已经操作：丢弃
+            if self.game.coach_token() != token:  # 计算期间玩家已经操作：丢弃（会话模式也不接这一轮）
                 self._log(token, attempt, file="battle_log.jsonl", ok=False, code=STALE)
                 return _fail(token, STALE)
+            result.commit()
             response = {
                 "ok": True,
                 "token": token,
@@ -275,7 +337,10 @@ class CoachService:
             self.memory.note_advice(token, snap["match_id"], "battle", snap["index"], move,
                                     result.evidence["moves"][0]["win_rate"])
             self._log(token, attempt, file="battle_log.jsonl", ok=True, actor=snap["actor"], move=move,
-                      **{key: result.trace[key] for key in ("moves", "candidates", "chosen_rank", "llm_ms", "engine_ms", "usage")})
+                      **{key: response["trace"][key] for key in (
+                          "mode", "basis", "moves", "chosen_rank", "evaluated", "llm_calls", "llm_ms", "tool_ms", "engine_ms",
+                          "usage", "total_ms")},
+                      tools=[step["tool"] for step in result.trace["steps"] if step["kind"] == "tool"])
             return response
 
     def judge_action(self, token: str | None, skill: str, target: str | None,

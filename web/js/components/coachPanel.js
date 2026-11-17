@@ -4,6 +4,7 @@
 import { app } from '../app.js';
 import { fill, h } from '../dom.js';
 import { MAX_RETRIES } from '../coach.js';
+import { traceView } from './traceView.js';
 
 const pct = (value) => `${Math.round(value * 100)}%`;
 
@@ -50,9 +51,28 @@ function experienceView(experience, shown) {
     untouched ? null : h('i', {}, basis));
 }
 
+// Top10 阵容表（经验库的数字）：Agent 只能在这里面选。推荐和备选高亮
+function topView(advice, evidence) {
+  if (!evidence.top || !evidence.top.length) return null;
+  const alts = new Set(advice.alternatives.map((alt) => alt.id));
+  return h('details', { class: 'coach-top', id: 'coach-top' },
+    h('summary', {}, `Top${evidence.top.length} 阵容（经验库推演，AI 只在这里面选）`),
+    h('table', {},
+      h('tbody', {}, evidence.top.map((row) => h('tr', {
+        class: row.id === advice.id ? 'chosen' : alts.has(row.id) ? 'alt' : '',
+        dataset: { id: row.id },
+      },
+        h('td', {}, row.id),
+        h('td', {}, names(row.lineup)),
+        h('td', {}, `本手 ${app.species(row.pick).name}`),
+        h('td', {}, pct(row.win_rate)),
+        h('td', {}, row.id === advice.id ? '推荐' : alts.has(row.id) ? '备选' : ''))))));
+}
+
 function adviceView(result) {
   const { advice, evidence } = result;
   const chosen = evidence.chosen;
+  const top = evidence.top && evidence.top[0];
   // 对手还没选完、但预测里只有一种补法（智能对手面对这套阵容时的选择是确定的）：写明预计它补谁
   const worst = chosen.replies > 1
     ? `最差 ${pct(chosen.worst_win_rate)}（对手补${names(chosen.worst_reply)}）`
@@ -61,7 +81,10 @@ function adviceView(result) {
     h('div', { class: 'coach-pick-row' },
       h('span', { class: 'coach-label' }, '👉 推荐'),
       h('span', { id: 'coach-pick' }, pet(advice.pet)),
-      advice.source === 'engine' ? h('span', { class: 'coach-tag', title: '引擎穷举推演的结果明显好于 AI 提出的全部方案' }, '引擎补充') : null,
+      chosen.rank > 1 && top ? h('span', {
+        class: 'coach-tag', id: 'coach-gap',
+        title: `AI 没有选表上第一的 ${top.id}（${names(top.lineup)}，${pct(top.win_rate)}），理由见下`,
+      }, `${chosen.id}，比 ${top.id} 低 ${Math.round(chosen.gap_to_top * 100)} 个百分点`) : null,
       h('span', {
         class: `coach-rate ${chosen.win_rate >= 0.55 ? 'good' : chosen.win_rate < 0.45 ? 'bad' : 'even'}`,
         title: `${evidence.label}\n共 ${chosen.samples} 局${chosen.verified ? '（选定后用新种子复核）' : ''}`,
@@ -76,9 +99,9 @@ function adviceView(result) {
     advice.alternatives.map((alt) =>
       h('p', { class: 'coach-alt', title: alt.reason },
         h('b', {}, '备选'), pet(alt.pet), h('i', {}, pct(alt.win_rate)),
-        alt.source === 'engine' ? h('span', { class: 'coach-tag' }, '引擎补充') : null,
         h('span', {}, alt.reason))),
-    advice.opp_read ? h('p', { class: 'coach-read' }, h('b', {}, '对手'), advice.opp_read) : null,
+    topView(advice, evidence),
+    traceView(result.trace),
     h('p', { class: 'coach-note' }, `${evidence.label} · AI 只给建议，仍需你自己拖拽并确认`),
   ];
 }

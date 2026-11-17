@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import random
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -30,6 +32,7 @@ from ..store import Store
 
 OPPONENT = "smart"
 ACTIONS = ("pick", "act")
+COACH_ATTEMPTS = 3  # 按游戏规则：每次建议最多请求 3 次（自动重试 2 次）
 
 
 def _fn(name: str, description: str, properties: dict[str, Any] | None = None,
@@ -59,7 +62,7 @@ TOOL_DEFS: dict[str, dict[str, Any]] = {
         "引擎推演评估（游戏内置）：把当前宠物的每个合法动作各推演若干局（双方接下来一整轮都按推演选择，智能对手按它的真实打法），返回每个动作的胜率、平局率、排名，以及这个动作的直接后果。只在轮到我方行动时可用"),
     "ask_battle_coach": _fn(
         "ask_battle_coach",
-        "AI 战斗指导（游戏内置）：在引擎推演分不出高下的候选动作里推荐一个，并给出理由和风险。只在轮到我方行动时可用"),
+        "AI 战斗指导（游戏内置）：先调用引擎把全部合法动作各推演若干局，再推荐一个动作，附理由、风险和本回合计划。只在轮到我方行动时可用，约需几秒"),
 }
 
 TOOLSETS: dict[str, tuple[str, ...]] = {
@@ -67,7 +70,64 @@ TOOLSETS: dict[str, tuple[str, ...]] = {
              "evaluate_moves", "ask_battle_coach", "pick", "act"),
     "engine": ("get_state", "search_pet_experience", "search_combo_experience", "evaluate_moves", "pick", "act"),
     "bare": ("get_state", "pick", "act"),
+    # 消融：三组都只有局面和 pick/act（没有引擎推演和知识库），差别只在 PUSH 里推送哪个 Agent 的建议
+    "coach": ("get_state", "pick", "act"),
+    "no_draft": ("get_state", "pick", "act"),
+    "no_battle": ("get_state", "pick", "act"),
+    "none": ("get_state", "pick", "act"),  # 两个 Agent 都不用：和 bare 一样，名字和消融的其他组对齐
 }
+
+# 像网页上的 AI 面板一样：每次轮到我方决策，自动向这些 Agent 要建议，附在局面后面交给玩家；采不采纳由玩家决定
+PUSH: dict[str, frozenset[str]] = {
+    "coach": frozenset({"draft", "battle"}),
+    "no_draft": frozenset({"battle"}),
+    "no_battle": frozenset({"draft"}),
+}
+
+
+class RecordingLLM:
+    """包住 Coach 的 LLM 客户端：请求原样转发，同时把完整的对话和回复写进 jsonl（Agent 内部的轨迹）。"""
+
+    def __init__(self, inner: Any, path: Path, role: str) -> None:
+        self._inner = inner
+        self._path = path
+        self._role = role
+        self._lock = threading.Lock()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def _write(self, record: dict[str, Any]) -> None:
+        line = json.dumps({"time": time.strftime("%Y-%m-%dT%H:%M:%S"), "role": self._role, **record},
+                          ensure_ascii=False, default=str)
+        with self._lock, open(self._path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+
+    def chat(self, messages, tools, **kwargs):
+        started = time.monotonic()
+        record = {"call": "chat", "messages": messages, "tools": [t["function"]["name"] for t in tools or []],
+                  "options": {k: v for k, v in kwargs.items() if k != "hint"}}
+        try:
+            reply = self._inner.chat(messages, tools, **kwargs)
+        except Exception as error:
+            self._write({**record, "ms": int((time.monotonic() - started) * 1000),
+                         "error": f"{type(error).__name__}: {getattr(error, 'message', error)}"})
+            raise
+        self._write({**record, "ms": int((time.monotonic() - started) * 1000), "reply": reply.message,
+                     "finish_reason": reply.finish_reason, "usage": reply.usage})
+        return reply
+
+    def complete(self, system, user, hint=None):
+        started = time.monotonic()
+        record = {"call": "complete", "system": system, "user": user}
+        try:
+            reply = self._inner.complete(system, user, hint)
+        except Exception as error:
+            self._write({**record, "ms": int((time.monotonic() - started) * 1000),
+                         "error": f"{type(error).__name__}: {getattr(error, 'message', error)}"})
+            raise
+        self._write({**record, "ms": int((time.monotonic() - started) * 1000), "reply": getattr(reply, "__dict__", str(reply))})
+        return reply
 
 
 def pet_name(key: str) -> str:
@@ -86,8 +146,10 @@ class AgentEnv:
     """一局「LLM 操作我方 vs 智能对手」。data_dir 是这一局独立的存档目录（战斗记录按游戏的标准格式保存）。"""
 
     def __init__(self, data_dir: str | Path, seed: int, toolset: str | tuple[str, ...], config: CoachConfig,
-                 *, workers: int = 0, audit: bool = True) -> None:
+                 *, workers: int = 0, audit: bool = True, match_id: str | None = None,
+                 trace_dir: str | Path | None = None) -> None:
         self.tool_names = TOOLSETS[toolset] if isinstance(toolset, str) else tuple(toolset)
+        self.push = PUSH.get(toolset, frozenset()) if isinstance(toolset, str) else frozenset()
         unknown = [name for name in self.tool_names if name not in TOOL_DEFS]
         if unknown:
             raise ValueError(f"未知工具：{unknown}")
@@ -99,16 +161,30 @@ class AgentEnv:
         self.profile = profile_for(OPPONENT)
         self.kb = KnowledgeBase.load()
         self.coach = None
-        if {"ask_draft_coach", "ask_battle_coach"} & set(self.tool_names):
+        if self.push or {"ask_draft_coach", "ask_battle_coach"} & set(self.tool_names):
             from ..coach.service import CoachService  # 只有用到军师 / 指导时才建（它要连 LLM）
 
             self.coach = CoachService(self.game, replace(config, reflect=OFF), workers=workers)
+        self.trace_dir = Path(trace_dir) if trace_dir is not None else None
+        if self.trace_dir is not None:
+            self.trace_dir.mkdir(parents=True, exist_ok=True)
+            if self.coach is not None:  # 两个 Agent 内部的每次 LLM 请求都记下来
+                llm_log = self.trace_dir / "coach_llm.jsonl"
+                if self.coach.advisor is not None:
+                    self.coach.advisor.llm = RecordingLLM(self.coach.advisor.llm, llm_log, "draft")
+                if self.coach.battle_agent is not None:
+                    self.coach.battle_agent.llm = RecordingLLM(self.coach.battle_agent.llm, llm_log, "battle")
         self.game.start_match(OPPONENT)  # 智能对手先选第一手
+        if match_id is not None:  # 推演的随机数由对局编号派生：各组用同一个编号才能配对比较
+            self.game.match.id = match_id
         self._seen = 0  # 已经交给 LLM 的战斗事件数
         self._evals: dict[str, battle_advice.Evaluation] = {}  # token → 引擎评估（LLM 调用或审计）
         self.decisions: list[dict[str, Any]] = []
         self._pending_tools: list[str] = []  # 上一次决策之后 LLM 调用过的只读工具
         self._advice: dict[str, Any] = {}  # token → 这个决策点上军师 / 指导给出的建议（统计是否采纳）
+        self._advice_ids: dict[str, str] = {}  # token → 玩家看到的那条建议的 advice_id（采纳标注用）
+        self._asked: dict[str, dict[str, Any]] = {}  # token → 这个决策点向 Agent 要建议的情况
+        self._pushed: dict[str, str] = {}  # token → 推送给玩家的建议文字（同一个决策点只请求一次）
         self.illegal = 0
 
     # ------------------------------------------------------------ 状态
@@ -131,8 +207,27 @@ class AgentEnv:
     def state_text(self) -> str:
         match = self.match
         if match.battle is None:
-            return self._draft_text()
-        return self._battle_text()
+            return self._draft_text() + self._pushed_advice("draft")
+        return self._battle_text() + self._pushed_advice("battle")
+
+    def _pushed_advice(self, kind: str) -> str:
+        """推送模式：轮到我方决策时，附上这个 Agent 的建议（和网页上的 AI 面板一样自动出现）。"""
+        if kind not in self.push or self.coach is None or self.finished:
+            return ""
+        if kind == "draft":
+            if self.match.draft.turn != "me":
+                return ""
+            token = self.game.coach_token()
+        else:
+            token = self._require_my_battle_turn()
+        if token is None:
+            return ""
+        if token not in self._pushed:
+            title = "AI 军师（选将建议）" if kind == "draft" else "AI 指导（本次行动建议）"
+            result = self._draft_coach() if kind == "draft" else self._battle_coach()
+            body = result["text"] if result["ok"] else f"暂无建议。{result['text']}"
+            self._pushed[token] = f"\n\n【{title}，游戏面板自动给出，仅供参考，最终由你决定】\n{body}"
+        return self._pushed[token]
 
     def _draft_text(self) -> str:
         match = self.match
@@ -265,9 +360,13 @@ class AgentEnv:
             self.game.pick("me", species)
         except GameError as error:
             return self._illegal(f"选将失败：{error}")
+        if self.coach is not None:
+            self.coach.note_pick(token, "me", species)  # 只记录是否采纳了建议
         opp_reply = match.draft.picks[step + 1][1] if len(match.draft.picks) > step + 1 else None
+        advised = self._advice.get(token)
         self._decision("pick", species, rationale, hand=step + 1, opp_reply=opp_reply,
-                       coach=self._advice.get(token))
+                       coach=advised, asked=self._asked.get(token),
+                       adopted=None if advised is None else advised == species)
         parts = [f"我方第 {len(match.draft.lineup('me'))} 只选了 {pet_name(species)}。"]
         if opp_reply:
             parts.append(f"对手方接着选了 {pet_name(opp_reply)}({opp_reply})。")
@@ -289,12 +388,17 @@ class AgentEnv:
         token = self.game.coach_token()
         legal = (skill, target) in battle.legal_moves()
         audit = self._audit(token, (skill, target)) if legal else None
+        mark = None
+        if legal and self.coach is not None and token in self._advice_ids:  # 玩家看过建议：标注是否采纳
+            mark = self.coach.judge_action(token, skill, target, self._advice_ids[token])
         try:
-            self.game.action(skill, target)
+            self.game.action(skill, target, mark)
         except GameError as error:
             return self._illegal(f"行动失败：{error}。局面没有变化。")
+        advised = self._advice.get(token)
         self._decision("act", [skill, target], rationale, index=index, round=round_, actor=actor,
-                       species=battle.pets[actor].species, audit=audit, coach=self._advice.get(token))
+                       species=battle.pets[actor].species, audit=audit, coach=advised, asked=self._asked.get(token),
+                       adopted=None if advised is None else advised == [skill, target])
         events = self._new_events()
         self.decisions[-1]["events"] = events
         return {"ok": True, "text": "发生的事件：\n" + "\n".join(events) + "\n\n" + self.state_text()}
@@ -347,13 +451,47 @@ class AgentEnv:
                 f"胜率 {_pct(value.win_rate)}，平局 {_pct(value.draw_rate)}，{evaluation.tier(value)}。直接后果：{fact_text(card)}")
         return {"ok": True, "text": "\n".join(lines)}
 
+    def _ask(self, kind: str, fn, token: str) -> dict[str, Any]:
+        """按游戏规则请求一次建议：失败自动重试，最多 COACH_ATTEMPTS 次。每次尝试和最终结果都写进 coach_calls.jsonl。"""
+        started = time.monotonic()
+        attempts, result = [], {}
+        for attempt in range(1, COACH_ATTEMPTS + 1):
+            began = time.monotonic()
+            result = fn(token, attempt)
+            attempts.append({"attempt": attempt, "ok": bool(result.get("ok")), "code": result.get("code"),
+                             "message": result.get("message"), "ms": int((time.monotonic() - began) * 1000)})
+            if result.get("ok") or not result.get("retryable", True):
+                break
+        seconds = round(time.monotonic() - started, 2)
+        info = self._asked.setdefault(token, {"kind": kind, "requests": 0, "attempts": 0, "ok": False, "seconds": 0.0})
+        info["requests"] += 1
+        info["attempts"] += len(attempts)
+        info["seconds"] = round(info["seconds"] + seconds, 2)
+        info["ok"] = info["ok"] or bool(result.get("ok"))
+        if result.get("ok"):
+            self._advice_ids[token] = result["advice_id"]
+            usage = (result.get("trace") or {}).get("usage") or {}
+            for key, value in usage.items():
+                info.setdefault("usage", {})[key] = info.get("usage", {}).get(key, 0) + value
+            if kind == "draft":
+                info["rank"] = result["evidence"]["chosen"]["rank"]
+                info["plan"] = result["advice"]["plan"]
+        if self.trace_dir is not None:
+            record = {"time": time.strftime("%Y-%m-%dT%H:%M:%S"), "kind": kind, "token": token,
+                      "decision": len(self.decisions), "seconds": seconds, "attempts": attempts, "ok": bool(result.get("ok"))}
+            if result.get("ok"):
+                record.update({key: result.get(key) for key in ("advice_id", "advice", "evidence", "trace")})
+            with open(self.trace_dir / "coach_calls.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        return result
+
     def _draft_coach(self) -> dict[str, Any]:
         if self.coach is None:
             return {"ok": False, "text": "AI 军师不可用。"}
         token = self.game.coach_token()
-        result = self.coach.draft(token)
+        result = self._ask("draft", self.coach.draft, token)
         if not result.get("ok"):
-            return {"ok": False, "text": f"AI 军师这次没给出建议：{result.get('message')}"}
+            return {"ok": False, "text": f"AI 军师这次没给出建议（已重试）：{result.get('message')}"}
         advice, evidence = result["advice"], result["evidence"]
         chosen = evidence["chosen"]
         lines = [
@@ -381,14 +519,17 @@ class AgentEnv:
         token = self._require_my_battle_turn()
         if token is None:
             return {"ok": False, "text": "现在不是我方的战斗行动回合。"}
-        result = self.coach.battle(token)
+        result = self._ask("battle", self.coach.battle, token)
         if not result.get("ok"):
-            return {"ok": False, "text": f"AI 战斗指导这次没给出建议：{result.get('message')}"}
+            return {"ok": False, "text": f"AI 战斗指导这次没给出建议（已重试）：{result.get('message')}"}
         advice = result["advice"]
-        best = result["evidence"]["moves"][0]
+        moves = result["evidence"]["moves"]
+        chosen = next((m for m in moves if [m.get("skill"), m.get("target")] == [advice["skill"], advice["target"]]),
+                      moves[0])
         text = (f"推荐：act({advice['skill']}, {advice['target']})。理由：{advice['reason']}"
                 + (f" 风险：{advice['risk']}" if advice.get("risk") else "")
-                + f"（推演胜率 {_pct(best['win_rate'])}）")
+                + (f" 本回合计划：{advice['plan']}" if advice.get("plan") else "")
+                + f"（推演胜率 {_pct(chosen['win_rate'])}）")
         self._advice[token] = [advice["skill"], advice["target"]]
         return {"ok": True, "text": text}
 

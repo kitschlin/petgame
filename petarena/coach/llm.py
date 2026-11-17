@@ -1,6 +1,8 @@
 """LLM 客户端：真实接口（httpx → OpenAI 兼容的 /chat/completions：DeepSeek 官方、SiliconFlow 等）和测试用的 Fake 模式。
 
-调用层只负责「发请求、分类错误」，不关心内容对不对；解析、校验、重试由上层负责。
+两种调用：complete（一问一答，要求 JSON 输出：复盘讲解、培养建议）和 chat（带工具的多轮对话的一步：
+选将、战斗 Agent，见 agentic/runtime.py）。调用层只负责「发请求、分类错误」，不关心内容对不对；
+解析、校验、重试由上层负责。
 """
 
 from __future__ import annotations
@@ -38,11 +40,26 @@ class LLMReply:
     ms: int = 0
 
 
+@dataclass
+class ChatReply:
+    """一次带工具的对话回复：message 是 assistant 消息原样（content / tool_calls）。"""
+
+    message: dict[str, Any]
+    finish_reason: str = "stop"
+    usage: dict[str, int] = field(default_factory=dict)
+    ms: int = 0
+
+
 class LLM(Protocol):
     name: str
 
     def complete(self, system: str, user: str, hint: dict[str, Any] | None = None) -> LLMReply:
         """system / user 是两条消息；hint 是同一局势的结构化副本，只有 FakeLLM 使用。"""
+
+    def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], *,
+             hint: dict[str, Any] | None = None, max_tokens: int | None = None,
+             timeout: float | None = None) -> ChatReply:
+        """多轮 function calling 的一步。hint 同上，只有 FakeLLM 使用。"""
 
 
 # SiliconFlow 上支持 enable_thinking 开关的混合思考模型（其余模型不认这个参数）
@@ -56,8 +73,11 @@ def is_reasoner(model: str) -> bool:
     return "-r1" in name or name.endswith("reasoner") or "thinking" in name
 
 
-def provider_options(base_url: str, model: str) -> dict[str, Any]:
-    """不同服务商关闭思考、要求 JSON 输出的写法不同；只放对方认识的参数。"""
+def provider_options(base_url: str, model: str, json_mode: bool = True) -> dict[str, Any]:
+    """不同服务商关闭思考、要求 JSON 输出的写法不同；只放对方认识的参数。
+
+    json_mode=False 用于带工具的对话：输出走 tool_calls，不能再要求整条回复是 JSON。
+    """
     name = model.lower()
     options: dict[str, Any] = {}
     # DeepSeek 官方接口（模型名不带「组织/」前缀，如 deepseek-flash）；SiliconFlow 的模型名都是「组织/模型」
@@ -66,7 +86,7 @@ def provider_options(base_url: str, model: str) -> dict[str, Any]:
         options["thinking"] = {"type": "disabled"}
     elif any(tag in name for tag in _HYBRID_THINKING) and not is_reasoner(model):
         options["enable_thinking"] = False  # SiliconFlow 等：Qwen3 / DeepSeek-V3.1+ 这类混合思考模型
-    if not is_reasoner(model):
+    if json_mode and not is_reasoner(model):
         options["response_format"] = {"type": "json_object"}  # 推理模型靠提示词 + 本地修复解析 JSON
     return options
 
@@ -77,22 +97,16 @@ class HttpLLM:
         self.name = config.model
         self._client = httpx.Client(timeout=config.timeout, transport=transport)
 
-    def complete(self, system: str, user: str, hint: dict[str, Any] | None = None) -> LLMReply:
+    def _post(self, body: dict[str, Any], timeout: float | None = None) -> tuple[dict[str, Any], int]:
+        """发一次请求，按状态码把错误分类成 LLMError。返回 (choices[0]（附上整理过的 usage），耗时毫秒)。"""
         config = self.config
-        body = {
-            "model": config.model,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            **provider_options(config.base_url, config.model),
-            "temperature": config.temperature,
-            # 推理模型的思考过程也算在输出里：放宽上限，免得答案被截断
-            "max_tokens": config.max_tokens * 4 if is_reasoner(config.model) else config.max_tokens,
-        }
         start = time.monotonic()
         try:
             response = self._client.post(
                 f"{config.base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {config.api_key}"},
                 json=body,
+                **({"timeout": timeout} if timeout else {}),
             )
         except httpx.TimeoutException:
             raise LLMError(TIMEOUT, "AI 响应超时", True) from None
@@ -110,35 +124,80 @@ class HttpLLM:
         if status == 429 or status >= 500:
             raise LLMError(LLM_ERROR, f"AI 服务暂时不可用（{status}）", True)
         if status != 200:
-            raise LLMError(LLM_ERROR, f"AI 请求被拒绝（{status}）", False)
+            raise LLMError(LLM_ERROR, f"AI 请求被拒绝（{status}）：{response.text[:120]}", False)
         try:
             data = response.json()
             choice = data["choices"][0]
-            text = choice["message"]["content"] or ""
+            if not isinstance(choice["message"], dict):
+                raise TypeError
         except (ValueError, KeyError, IndexError, TypeError):
             raise LLMError(LLM_ERROR, "AI 返回的内容格式不对", True) from None
         usage = data.get("usage") or {}
-        return LLMReply(
-            text=text,
-            finish_reason=choice.get("finish_reason") or "stop",
-            usage={key: usage[key] for key in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens")
-                   if isinstance(usage.get(key), int)},
-            ms=ms,
-        )
+        choice["usage"] = {key: usage[key] for key in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens")
+                           if isinstance(usage.get(key), int)}
+        return choice, ms
+
+    def _limit(self, max_tokens: int | None) -> int:
+        limit = max_tokens or self.config.max_tokens
+        # 推理模型的思考过程也算在输出里：放宽上限，免得答案被截断
+        return limit * 4 if is_reasoner(self.config.model) else limit
+
+    def complete(self, system: str, user: str, hint: dict[str, Any] | None = None) -> LLMReply:
+        config = self.config
+        body = {
+            "model": config.model,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            **provider_options(config.base_url, config.model),
+            "temperature": config.temperature,
+            "max_tokens": self._limit(None),
+        }
+        choice, ms = self._post(body)
+        return LLMReply(text=choice["message"].get("content") or "",
+                        finish_reason=choice.get("finish_reason") or "stop", usage=choice["usage"], ms=ms)
+
+    def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], *,
+             hint: dict[str, Any] | None = None, max_tokens: int | None = None,
+             timeout: float | None = None) -> ChatReply:
+        config = self.config
+        body = {
+            "model": config.model,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": "auto",
+            **provider_options(config.base_url, config.model, json_mode=False),
+            "temperature": config.temperature,
+            "max_tokens": self._limit(max_tokens),
+        }
+        choice, ms = self._post(body, timeout)
+        message = choice["message"]
+        kept: dict[str, Any] = {"role": "assistant", "content": message.get("content") or ""}
+        if message.get("tool_calls"):
+            kept["tool_calls"] = [
+                {"id": call.get("id") or f"call_{index}", "type": "function",
+                 "function": {"name": call["function"]["name"], "arguments": call["function"].get("arguments") or "{}"}}
+                for index, call in enumerate(message["tool_calls"])
+                if isinstance(call, dict) and isinstance(call.get("function"), dict) and call["function"].get("name")
+            ]
+        if message.get("reasoning_content"):  # 推理模型：多轮对话里要原样带回
+            kept["reasoning_content"] = message["reasoning_content"]
+        return ChatReply(kept, choice.get("finish_reason") or "stop", choice["usage"], ms)
 
     def close(self) -> None:
         self._client.close()
 
 
 class FakeLLM:
-    """不联网的假模型：按固定规则从组合经验库里挑方案，用于演示和测试。
+    """不联网的假模型，只给自动化测试和 e2e 用（必须显式开启，永远不会自动启用）。
 
-    fail_first > 0 时，同一手的前 N 次调用返回无法解析的内容，用来演示重试。
+    - 选将 / 战斗（chat，带工具）：按固定规则调用工具。选将直接提交 Top10 的第 1 套；战斗直接提交
+      推演胜率最高的动作（依据 engine）。它看的是 hint（Agent 放进去的结构化副本），不解析文字。
+    - 复盘 / 培养（complete）：照着引擎给的事实编号写。
+    fail_first > 0 时，同一手的前 N 次请求故意提交不合法的结果，用来演示重试。
     """
 
     name = "fake"
 
-    def __init__(self, knowledge, fail_first: int = 0, delay: float = 0.0,
+    def __init__(self, knowledge=None, fail_first: int = 0, delay: float = 0.0,
                  sleep: Callable[[float], None] = time.sleep) -> None:
         self.knowledge = knowledge
         self.fail_first = fail_first
@@ -146,24 +205,63 @@ class FakeLLM:
         self._sleep = sleep
         self._calls: dict[str, int] = {}
 
+    def _failing(self, hint: dict[str, Any]) -> bool:
+        """这一次请求要不要故意失败（每个 token 的第一次 LLM 调用计一次请求）。"""
+        key = str(hint.get("token"))
+        if hint.get("first_call", True):
+            self._calls[key] = self._calls.get(key, 0) + 1
+        return 0 < self._calls.get(key, 0) <= self.fail_first
+
+    # ------------------------------------------------------------ 带工具的对话
+
+    def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], *,
+             hint: dict[str, Any] | None = None, max_tokens: int | None = None,
+             timeout: float | None = None) -> ChatReply:
+        hint = hint if hint is not None else {}
+        if self.delay:
+            self._sleep(self.delay)
+        failing = self._failing(hint)
+        hint["first_call"] = False
+        names = {tool["function"]["name"] for tool in tools}
+        if "submit_recommendation" in names:
+            rows = hint.get("rows") or []
+            first = rows[0] if rows else {"id": "T1"}
+            alternatives, picks = [], {first.get("pick")}
+            for row in rows[1:]:
+                if row["pick"] not in picks and len(alternatives) < 2:
+                    picks.add(row["pick"])
+                    alternatives.append({"choice": row["id"], "reason": "（假模型）表上胜率靠前的另一套"})
+            args = {"choice": "T99" if failing else first["id"],
+                    "reason": "（假模型）选 Top10 表里胜率最高的一套", "alternatives": alternatives,
+                    "strategy": "（假模型）按表上第一套打"}
+            return self._call("submit_recommendation", args)
+        moves = hint.get("moves") or []
+        if failing or not moves:
+            return self._call("submit_move", {"basis": "engine", "skill": "nonsense", "target": None,
+                                              "reason": "（假模型）故意出错"})
+        skill, target, text = moves[0]
+        return self._call("submit_move", {
+            "basis": "engine", "skill": skill, "target": target, "reason": f"（假模型）推演最优：{text}"[:90],
+            "plan": "（假模型）每一步都照推演最优出招"})
+
+    _ids = 0
+
+    def _call(self, name: str, args: dict[str, Any]) -> ChatReply:
+        FakeLLM._ids += 1
+        return ChatReply({"role": "assistant", "content": "", "tool_calls": [{
+            "id": f"fake_{FakeLLM._ids}", "type": "function",
+            "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}}]})
+
+    # ------------------------------------------------------------ 一问一答（复盘、培养）
+
     def complete(self, system: str, user: str, hint: dict[str, Any] | None = None) -> LLMReply:
         hint = hint or {}
         if self.delay:
             self._sleep(self.delay)
-        key = str(hint.get("token"))
-        self._calls[key] = self._calls.get(key, 0) + 1
-        if self._calls[key] <= self.fail_first:
+        if self._failing(hint):
             return LLMReply(text="（假模型：这次故意输出了无法解析的内容）")
-        answer = {"battle": self._battle, "review": self._review, "growth": self._growth}.get(
-            hint.get("kind"), self._plans)(hint)
+        answer = {"review": self._review, "growth": self._growth}[hint.get("kind")](hint)
         return LLMReply(text=json.dumps(answer, ensure_ascii=False))
-
-    @staticmethod
-    def _battle(hint: dict[str, Any]) -> dict[str, Any]:
-        """战斗指导：选引擎排在第一的候选，理由照抄它的直接后果。"""
-        first = hint["candidates"][0]
-        return {"skill": first["skill"], "target": first["target"],
-                "reason": f"（假模型）{first['text']}：{first['facts']}"[:90], "risk": ""}
 
     @staticmethod
     def _review(hint: dict[str, Any]) -> dict[str, Any]:
@@ -193,28 +291,3 @@ class FakeLLM:
             "stop": "（假模型）练到路线里写的数值就停，再往上没有额外收益。" if steps else "（假模型）现在不用练。",
             "avoid": "（假模型）「别练」清单里的项目会让胜算下降。" if hint.get("avoid") else "",
         }
-
-    def _plans(self, hint: dict[str, Any]) -> dict[str, Any]:
-        from ..engine.pets import SPECIES_ORDER
-
-        mine: list[str] = list(hint.get("my_picked", []))
-        opp: list[str] = list(hint.get("opp_picked", []))
-        predicted = (opp + [key for key in ("cat", "dog", "snake", "deer", "turtle") if key not in opp])[:3]
-        plans = []
-        combos = self.knowledge.search_combo_experience(
-            include=mine, against=opp, limit=5, opp_policy=hint.get("opp_policy", "heuristic"))
-        for combo in combos:
-            order = combo.get("order") or combo["members"]
-            rest = [key for key in order if key not in mine]
-            plans.append({
-                "lineup": mine + rest, "predicted_opp": predicted,
-                "style": combo["style"][:12], "reason": combo["synergy"][:80],
-            })
-        if not plans:  # 经验库里没有包含已选宠物的组合：按固定优先级补齐
-            priority = ["cat", "dog", "snake", "mouse", "fish", "rabbit", "turtle", "deer"]
-            rest = [key for key in priority if key not in mine and key in SPECIES_ORDER]
-            plans.append({
-                "lineup": (mine + rest)[:3], "predicted_opp": predicted,
-                "style": "补足输出", "reason": "已选宠物没有现成的组合经验，优先补上输出位",
-            })
-        return {"opp_read": "（假模型）对手倾向于厚血持久战", "plans": plans}

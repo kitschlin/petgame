@@ -106,6 +106,8 @@ class Match:
         self.battle: Battle | None = None
         # 第几次行动（序号）→ 当时 AI 建议了什么、玩家是否采纳。只用于日志标注，不参与结算和回放
         self.marks: dict[int, dict[str, Any]] = {}
+        # 第几次行动（序号）→ 战斗指导当时对各合法动作的推演结果。留给复盘复用，不参与结算和回放
+        self.evals: dict[int, dict[str, Any]] = {}
 
     @property
     def phase(self) -> str:
@@ -372,7 +374,18 @@ class GameService:
                 "options": battle.options(),
                 "view": battle.view(),
                 "static": battle.static(),
+                "events": [event.get("text") or "" for event in battle.events],  # 给战斗 Agent 讲「上次之后发生了什么」
+                "marks": {str(index): dict(mark) for index, mark in match.marks.items()},
             }
+
+    def coach_note_eval(self, token: str, data: dict[str, Any]) -> bool:
+        """记下战斗指导对这个决策点的推演结果（随对局记录保存，留给复盘）。局面已经推进时忽略。"""
+        with self._lock:
+            match = self.match
+            if match is None or match.phase != BATTLE or self._coach_token(match) != token:
+                return False
+            match.evals[len(match.battle.actions)] = data
+            return True
 
     def _require(self, phase: str, message: str) -> Match:
         if self.match is None or self.match.phase != phase:
@@ -402,6 +415,8 @@ class GameService:
         }
         if match.marks:
             record["marks"] = {str(index): mark for index, mark in match.marks.items()}
+        if match.evals:
+            record["evals"] = {str(index): data for index, data in match.evals.items()}
         summary = {
             "id": match.id,
             "started_at": record["started_at"],
@@ -425,6 +440,7 @@ class GameService:
             "ai_seed": match.ai_seed,
             "actions": match.battle.actions if match.battle else [],
             **({"marks": {str(index): mark for index, mark in match.marks.items()}} if match.marks else {}),
+            **({"evals": {str(index): data for index, data in match.evals.items()}} if match.evals else {}),
         })
 
     def _restore(self) -> None:
@@ -440,6 +456,7 @@ class GameService:
             if match.draft.complete:
                 match.battle = Battle.replay(match.lineups(), match.seed, data["actions"])
             match.marks = {int(index): mark for index, mark in (data.get("marks") or {}).items()}
+            match.evals = {int(index): value for index, value in (data.get("evals") or {}).items()}
             self.match = match
         except Exception:  # 存档与当前规则不兼容：丢弃这场对局
             self.match = None
